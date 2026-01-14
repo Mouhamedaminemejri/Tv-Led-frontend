@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { UserMenu } from "@/components/user-menu";
 import { ChevronLeft, ChevronRight, ArrowLeft, ShoppingCart, Star, CheckCircle2, AlertCircle, Package, Loader2, Home, CreditCard, Plus, Minus, ZoomIn } from "lucide-react";
 import { AddToCartDialog } from "@/components/add-to-cart-dialog";
 import { useCart } from "@/context/cart-context";
@@ -282,12 +283,18 @@ export default function ProductDetailPage() {
                         </nav>
                     )}
                     
-                    <div className="flex items-center gap-4">
-                        <div className="flex flex-col items-end mr-2 hidden sm:flex">
-                            <span className="text-xs text-gray-500 dark:text-gray-400">Your Basket</span>
-                            <CartPrice />
+                    <div className="flex items-center gap-3">
+                        {/* User Menu */}
+                        <UserMenu />
+                        
+                        {/* Cart */}
+                        <div className="flex items-center gap-3">
+                            <div className="hidden sm:flex flex-col items-end">
+                                <span className="text-xs text-gray-500 dark:text-gray-400">Your Basket</span>
+                                <CartPrice />
+                            </div>
+                            <CartTriggerBtn />
                         </div>
-                        <CartTriggerBtn />
                     </div>
                 </div>
             </header>

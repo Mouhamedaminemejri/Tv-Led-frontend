@@ -1,7 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { CartService, type CartItem } from "@/services/cart-service";
+import { GuestSession } from "@/utils/guest-session";
 import { toast } from "sonner";
 
 interface CartContextType {
@@ -13,7 +14,8 @@ interface CartContextType {
     removeFromCart: (cartItemId: string) => Promise<void>;
     updateQuantity: (cartItemId: string, quantity: number) => Promise<void>;
     clearCart: () => Promise<void>;
-    openCart: () => void; // To open the sheet from anywhere
+    refreshCart: () => Promise<void>; // Refresh cart after auth changes
+    openCart: () => void;
     isCartOpen: boolean;
     setCartOpen: (open: boolean) => void;
 }
@@ -26,25 +28,54 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const [isMounted, setIsMounted] = useState(false);
     const [loading, setLoading] = useState(true);
 
-    // Fetch cart from backend on mount
+    // Load cart function (reusable)
+    const loadCart = useCallback(async () => {
+        try {
+            setLoading(true);
+            const cartData = await CartService.getCart();
+            setCart(cartData);
+        } catch (error) {
+            console.error("Failed to load cart:", error);
+            setCart([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    // Initialize guest session and fetch cart on mount
     useEffect(() => {
         setIsMounted(true);
-        const loadCart = async () => {
-            try {
-                setLoading(true);
-                const cartData = await CartService.getCart();
-                setCart(cartData);
-            } catch (error) {
-                console.error("Failed to load cart:", error);
-                // Don't show error toast on initial load - backend might not be ready
-                // Just use empty cart as fallback
-                setCart([]);
-            } finally {
-                setLoading(false);
-            }
+        const initialize = async () => {
+            // Ensure guest token exists (for non-authenticated users)
+            await GuestSession.initialize();
+            // Load cart
+            await loadCart();
         };
-        loadCart();
-    }, []);
+        initialize();
+    }, [loadCart]);
+
+    // Listen for auth state changes to refresh cart
+    useEffect(() => {
+        const handleAuthChange = () => {
+            loadCart();
+        };
+
+        // Listen for custom auth events
+        window.addEventListener('auth:login', handleAuthChange);
+        window.addEventListener('auth:logout', handleAuthChange);
+        window.addEventListener('auth:register', handleAuthChange);
+
+        return () => {
+            window.removeEventListener('auth:login', handleAuthChange);
+            window.removeEventListener('auth:logout', handleAuthChange);
+            window.removeEventListener('auth:register', handleAuthChange);
+        };
+    }, [loadCart]);
+
+    // Refresh cart (called after login/logout)
+    const refreshCart = useCallback(async () => {
+        await loadCart();
+    }, [loadCart]);
 
     const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
     const cartTotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
@@ -102,7 +133,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return (
         <CartContext.Provider value={{
             cart, cartCount, cartTotal, loading,
-            addToCart, removeFromCart, updateQuantity, clearCart,
+            addToCart, removeFromCart, updateQuantity, clearCart, refreshCart,
             openCart, isCartOpen, setCartOpen
         }}>
             {children}

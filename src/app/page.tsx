@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { UserMenu } from "@/components/user-menu";
 import { Wrench, Component, Tv, Zap, MonitorPlay, ArrowRight, Facebook, Instagram, Twitter, Sun, Moon, Monitor } from "lucide-react";
 import Link from "next/link";
 import { useTheme } from "@/context/theme-context";
@@ -100,19 +101,20 @@ export default function Home() {
             <Link href="#" className="hover:text-gray-900 dark:hover:text-white transition-colors">Forum</Link>
             <Link href="#" className="hover:text-gray-900 dark:hover:text-white transition-colors">Contact</Link>
           </nav>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             {/* Theme Toggle Button */}
             <Button
               variant="ghost"
               size="sm"
               onClick={cycleTheme}
-              className="h-8 px-2 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="h-8 px-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
               title={`Theme: ${getThemeLabel()}`}
             >
               {getThemeIcon()}
             </Button>
-            <Button variant="ghost" size="sm" className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10">Login</Button>
-            <Button size="sm" className="bg-gray-900 dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200">Get Started</Button>
+            
+            {/* User Menu */}
+            <UserMenu />
           </div>
         </div>
       </header>

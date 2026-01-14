@@ -26,7 +26,7 @@ import type {
 // Configuration
 // ============================================================================
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const AUTH_ENDPOINTS = {
     // Core authentication
     login: '/auth/login',
@@ -179,9 +179,12 @@ export const AuthService = {
      * Register a new account
      */
     async register(credentials: RegisterCredentials): Promise<RegisterResponse> {
+        // Strip frontend-only fields before sending to backend
+        const { confirmPassword, acceptTerms, subscribeNewsletter, ...backendCredentials } = credentials;
+        
         const response = await authFetch<RegisterResponse>(AUTH_ENDPOINTS.register, {
             method: 'POST',
-            body: JSON.stringify(credentials),
+            body: JSON.stringify(backendCredentials),
         });
 
         return response;

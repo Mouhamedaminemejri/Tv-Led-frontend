@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input"; // Verified import
+import { UserMenu } from "@/components/user-menu";
 
 import { ShoppingCart, Filter, Star, Heart, CheckCircle2, ChevronLeft, ChevronRight, Eye, Home } from "lucide-react";
 import Link from "next/link";
@@ -364,14 +365,18 @@ export default function LedPage() {
                         />
                     </div>
 
-                    <div className="flex items-center gap-4">
-                        <div className="flex flex-col items-end mr-2 hidden sm:flex">
-                            <span className="text-xs text-gray-600 dark:text-gray-400">Your Basket</span>
-                            {/* Dynamically Update Price */}
-                            <CartPrice />
+                    <div className="flex items-center gap-3">
+                        {/* User Menu */}
+                        <UserMenu />
+                        
+                        {/* Cart */}
+                        <div className="flex items-center gap-3">
+                            <div className="hidden sm:flex flex-col items-end">
+                                <span className="text-xs text-gray-600 dark:text-gray-400">Your Basket</span>
+                                <CartPrice />
+                            </div>
+                            <CartTriggerBtn />
                         </div>
-                        {/* Cart Trigger */}
-                        <CartTriggerBtn />
                     </div>
                 </div>
             </header>

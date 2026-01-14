@@ -15,6 +15,8 @@ import type {
     OAuthCredentials,
 } from "@/types/auth";
 import { AuthService, TokenManager } from "@/services/auth-service";
+import { CartService } from "@/services/cart-service";
+import { GuestSession } from "@/utils/guest-session";
 
 // ============================================================================
 // Context Types
@@ -144,24 +146,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const login = React.useCallback(async (credentials: LoginCredentials) => {
         dispatch({ type: "AUTH_START" });
         try {
-            const response = await AuthService.login(credentials);
+            // Include guest session ID for cart migration
+            const guestToken = GuestSession.getToken();
+            const credentialsWithGuest = {
+                ...credentials,
+                guestSessionId: guestToken || undefined,
+            };
+            
+            const response = await AuthService.login(credentialsWithGuest);
             dispatch({ type: "AUTH_SUCCESS", payload: response.user });
-            router.push("/");
+            
+            // Clear guest token after successful login (cart has been migrated)
+            if (guestToken) {
+                CartService.clearGuestToken();
+            }
+            
+            // Notify cart context to refresh
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new Event('auth:login'));
+            }
+            
+            // Don't navigate here - let the caller handle navigation
+            // This allows redirect URLs to work properly
         } catch (error: any) {
             const message = error?.message || "Login failed. Please check your credentials.";
             dispatch({ type: "AUTH_ERROR", payload: message });
             throw error;
         }
-    }, [router]);
+    }, []);
 
     const register = React.useCallback(async (credentials: RegisterCredentials) => {
         dispatch({ type: "AUTH_START" });
         try {
-            const response = await AuthService.register(credentials);
+            // Include guest session ID for cart migration
+            const guestToken = GuestSession.getToken();
+            const credentialsWithGuest = {
+                ...credentials,
+                guestSessionId: guestToken || undefined,
+            };
+            
+            const response = await AuthService.register(credentialsWithGuest);
             
             if (!response.requiresVerification) {
                 dispatch({ type: "AUTH_SUCCESS", payload: response.user });
-                router.push("/");
+                
+                // Clear guest token after successful registration (cart has been migrated)
+                if (guestToken) {
+                    CartService.clearGuestToken();
+                }
+                
+                // Notify cart context to refresh
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new Event('auth:register'));
+                }
+                
+                // Don't navigate here - let the caller handle navigation
             } else {
                 dispatch({ type: "AUTH_LOGOUT" });
             }
@@ -172,7 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             dispatch({ type: "AUTH_ERROR", payload: message });
             throw error;
         }
-    }, [router]);
+    }, []);
 
     const loginWithGoogle = React.useCallback(() => {
         const url = AuthService.getGoogleOAuthUrl();
@@ -220,6 +259,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await AuthService.logout();
         } finally {
             dispatch({ type: "AUTH_LOGOUT" });
+            
+            // Clear old guest token and generate a new one for the anonymous session
+            GuestSession.clearToken();
+            await GuestSession.generateToken();
+            
+            // Notify cart context to refresh (will now use new guest session)
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new Event('auth:logout'));
+            }
+            
             router.push("/");
         }
     }, [router]);

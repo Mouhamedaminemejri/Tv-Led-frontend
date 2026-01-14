@@ -17,8 +17,8 @@ export interface User {
     updatedAt: string;
 }
 
-export type AuthProvider = 'local' | 'google' | 'facebook';
-export type UserRole = 'customer' | 'admin' | 'vendor';
+export type AuthProvider = 'local' | 'google' | 'facebook' | 'LOCAL' | 'GOOGLE' | 'FACEBOOK' | 'APPLE';
+export type UserRole = 'customer' | 'admin' | 'vendor' | 'CUSTOMER' | 'ADMIN' | 'VENDOR';
 
 // Auth State
 export interface AuthState {
@@ -33,6 +33,7 @@ export interface LoginCredentials {
     email: string;
     password: string;
     rememberMe?: boolean;
+    guestSessionId?: string; // For cart migration
 }
 
 export interface LoginResponse {
@@ -52,6 +53,7 @@ export interface RegisterCredentials {
     phone?: string;
     acceptTerms: boolean;
     subscribeNewsletter?: boolean;
+    guestSessionId?: string; // For cart migration
 }
 
 export interface RegisterResponse {
