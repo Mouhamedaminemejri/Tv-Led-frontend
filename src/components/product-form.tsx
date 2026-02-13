@@ -71,7 +71,11 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
     const [newTag, setNewTag] = React.useState("");
     const [uploadingImages, setUploadingImages] = React.useState(false);
     const [validationError, setValidationError] = React.useState<string | null>(null);
-    const [brandSuggestions, setBrandSuggestions] = React.useState<string[]>([]);
+    const [brandOptions, setBrandOptions] = React.useState<string[]>([]);
+    const [backlightTypeOptions, setBacklightTypeOptions] = React.useState<string[]>(["Direct LED", "Edge LED"]);
+    const [supplierOptions, setSupplierOptions] = React.useState<string[]>([]);
+    const [showAddSupplier, setShowAddSupplier] = React.useState(false);
+    const [newSupplierName, setNewSupplierName] = React.useState("");
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     // Image preview dialog
@@ -91,13 +95,79 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
         setPreviewIndex(prev => (prev + 1) % formData.images.length);
     };
 
+    // Load dropdown options from API
     React.useEffect(() => {
-        const loadBrandSuggestions = async () => {
-            const brands = await ProductService.getAllBrands();
-            setBrandSuggestions(brands);
-        };
-        loadBrandSuggestions();
+        ProductService.getAllBrands()
+            .then((brands) => setBrandOptions(brands.sort()))
+            .catch(() => {});
+        ProductService.getFilterData()
+            .then((items) => {
+                const types = new Set<string>(["Direct LED", "Edge LED"]);
+                for (const item of items) {
+                    const t = (item as Record<string, unknown>).tvBacklightType;
+                    if (typeof t === "string" && t.trim()) types.add(t.trim());
+                }
+                setBacklightTypeOptions(Array.from(types).sort());
+            })
+            .catch(() => {});
+        // Load unique suppliers from products
+        ProductService.getPaginatedProducts(1, 500, {})
+            .then((res) => {
+                const suppliers = new Set<string>();
+                for (const p of res.products) {
+                    const s = (p as Record<string, unknown>).supplier;
+                    if (typeof s === "string" && s.trim()) suppliers.add(s.trim());
+                }
+                // Also load from localStorage (user-added suppliers)
+                try {
+                    const saved = JSON.parse(localStorage.getItem("custom_suppliers") || "[]") as string[];
+                    for (const s of saved) if (s.trim()) suppliers.add(s.trim());
+                } catch { /* ignore */ }
+                setSupplierOptions(Array.from(suppliers).sort());
+            })
+            .catch(() => {
+                // At least load custom suppliers from localStorage
+                try {
+                    const saved = JSON.parse(localStorage.getItem("custom_suppliers") || "[]") as string[];
+                    setSupplierOptions(saved.sort());
+                } catch { /* ignore */ }
+            });
     }, []);
+
+    const handleAddSupplier = () => {
+        const name = newSupplierName.trim();
+        if (!name) return;
+        if (supplierOptions.includes(name)) {
+            // Already exists — just select it
+            handleInputChange("supplier", name);
+            setShowAddSupplier(false);
+            setNewSupplierName("");
+            return;
+        }
+        const updated = [...supplierOptions, name].sort();
+        setSupplierOptions(updated);
+        handleInputChange("supplier", name);
+        // Persist to localStorage so it appears next time
+        try {
+            const saved = JSON.parse(localStorage.getItem("custom_suppliers") || "[]") as string[];
+            if (!saved.includes(name)) {
+                localStorage.setItem("custom_suppliers", JSON.stringify([...saved, name]));
+            }
+        } catch { /* ignore */ }
+        setShowAddSupplier(false);
+        setNewSupplierName("");
+    };
+
+    const handleDeleteSupplier = (name: string) => {
+        const updated = supplierOptions.filter(s => s !== name);
+        setSupplierOptions(updated);
+        if (formData.supplier === name) handleInputChange("supplier", "");
+        // Remove from localStorage
+        try {
+            const saved = JSON.parse(localStorage.getItem("custom_suppliers") || "[]") as string[];
+            localStorage.setItem("custom_suppliers", JSON.stringify(saved.filter(s => s !== name)));
+        } catch { /* ignore */ }
+    };
 
     const handleInputChange = (field: keyof ProductFormData, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -245,20 +315,21 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                     </div>
                     <div>
                         <Label htmlFor="brand" className="text-gray-900 dark:text-white">Brand *</Label>
-                        <Input
+                        <select
                             id="brand"
                             value={formData.brand}
                             onChange={(e) => handleInputChange("brand", e.target.value)}
-                            list="brand-suggestions"
-                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
-                            placeholder="e.g., Samsung"
+                            className="mt-1 flex h-10 w-full rounded-md border border-gray-300 dark:border-white/10 bg-white dark:bg-black px-3 py-2 text-sm text-gray-900 dark:text-white ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                             required
-                        />
-                        <datalist id="brand-suggestions">
-                            {brandSuggestions.map((brand) => (
-                                <option key={brand} value={brand} />
+                        >
+                            <option value="">Select brand...</option>
+                            {brandOptions.map((brand) => (
+                                <option key={brand} value={brand}>{brand}</option>
                             ))}
-                        </datalist>
+                            {formData.brand && !brandOptions.includes(formData.brand) && (
+                                <option value={formData.brand}>{formData.brand}</option>
+                            )}
+                        </select>
                     </div>
                     <div className="md:col-span-2">
                         <Label htmlFor="title" className="text-gray-900 dark:text-white">Title *</Label>
@@ -371,23 +442,86 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                     </div>
                     <div>
                         <Label htmlFor="supplier" className="text-gray-900 dark:text-white">Supplier</Label>
-                        <Input
-                            id="supplier"
-                            value={formData.supplier}
-                            onChange={(e) => handleInputChange("supplier", e.target.value)}
-                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
-                            placeholder="Supplier name"
-                        />
+                        {!showAddSupplier ? (
+                            <div className="flex gap-1.5 mt-1">
+                                <select
+                                    id="supplier"
+                                    value={formData.supplier}
+                                    onChange={(e) => {
+                                        if (e.target.value === "__add_new__") {
+                                            setShowAddSupplier(true);
+                                        } else {
+                                            handleInputChange("supplier", e.target.value);
+                                        }
+                                    }}
+                                    className="flex h-10 w-full rounded-md border border-gray-300 dark:border-white/10 bg-white dark:bg-black px-3 py-2 text-sm text-gray-900 dark:text-white ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                >
+                                    <option value="">Select supplier...</option>
+                                    {supplierOptions.map((s) => (
+                                        <option key={s} value={s}>{s}</option>
+                                    ))}
+                                    {formData.supplier && !supplierOptions.includes(formData.supplier) && (
+                                        <option value={formData.supplier}>{formData.supplier}</option>
+                                    )}
+                                    <option value="__add_new__">+ Add new supplier...</option>
+                                </select>
+                                {formData.supplier && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleDeleteSupplier(formData.supplier)}
+                                        className="flex-shrink-0 h-10 w-10 rounded-md border border-red-200 dark:border-red-800/30 bg-red-50 dark:bg-red-900/10 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20 flex items-center justify-center transition-colors"
+                                        title="Remove this supplier from the list"
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </button>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="flex gap-1.5 mt-1">
+                                <Input
+                                    value={newSupplierName}
+                                    onChange={(e) => setNewSupplierName(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddSupplier(); } }}
+                                    className="bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
+                                    placeholder="New supplier name..."
+                                    autoFocus
+                                />
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={handleAddSupplier}
+                                    className="h-10 px-3 bg-blue-600 hover:bg-blue-500 text-white flex-shrink-0"
+                                >
+                                    <Plus className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => { setShowAddSupplier(false); setNewSupplierName(""); }}
+                                    className="h-10 px-3 flex-shrink-0"
+                                >
+                                    <X className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        )}
                     </div>
                     <div>
                         <Label htmlFor="tvBacklightType" className="text-gray-900 dark:text-white">TV Backlight Type</Label>
-                        <Input
+                        <select
                             id="tvBacklightType"
                             value={formData.tvBacklightType}
                             onChange={(e) => handleInputChange("tvBacklightType", e.target.value)}
-                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
-                            placeholder="e.g., Direct LED"
-                        />
+                            className="mt-1 flex h-10 w-full rounded-md border border-gray-300 dark:border-white/10 bg-white dark:bg-black px-3 py-2 text-sm text-gray-900 dark:text-white ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        >
+                            <option value="">Select type...</option>
+                            {backlightTypeOptions.map((type) => (
+                                <option key={type} value={type}>{type}</option>
+                            ))}
+                            {formData.tvBacklightType && !backlightTypeOptions.includes(formData.tvBacklightType) && (
+                                <option value={formData.tvBacklightType}>{formData.tvBacklightType}</option>
+                            )}
+                        </select>
                     </div>
                     <div>
                         <Label htmlFor="tvPanelType" className="text-gray-900 dark:text-white">TV Panel Type</Label>
@@ -442,7 +576,29 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                         />
                     </div>
                     <div className="md:col-span-2">
-                        <Label htmlFor="config" className="text-gray-900 dark:text-white">Config (JSON string)</Label>
+                        <div className="flex items-center justify-between">
+                            <Label htmlFor="config" className="text-gray-900 dark:text-white">Config (JSON string)</Label>
+                            <select
+                                value=""
+                                onChange={(e) => {
+                                    if (e.target.value) {
+                                        handleInputChange("config", e.target.value);
+                                    }
+                                }}
+                                className="text-xs border border-gray-300 dark:border-white/10 bg-white dark:bg-black text-gray-600 dark:text-gray-400 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                                <option value="">Load template...</option>
+                                <option value='{"discountedPrice":0,"deliveryMethods":[],"estimatedDeliveryGapHours":48}'>
+                                    Standard (delivery + discount)
+                                </option>
+                                <option value='{"discountedPrice":0,"deliveryMethods":["express","standard"],"estimatedDeliveryGapHours":24}'>
+                                    Express delivery
+                                </option>
+                                <option value='{"discountedPrice":0,"deliveryMethods":[],"estimatedDeliveryGapHours":0}'>
+                                    Minimal (empty)
+                                </option>
+                            </select>
+                        </div>
                         <Textarea
                             id="config"
                             value={formData.config}

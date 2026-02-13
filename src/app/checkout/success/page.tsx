@@ -55,10 +55,25 @@ function SuccessInner() {
     const gateway = searchParams.get("gateway") || "";
     const method = searchParams.get("method") || "";
     const orderNumberParam = searchParams.get("orderNumber") || "";
+    const isMock = searchParams.get("mock") === "true";
+    const transactionId = searchParams.get("transactionId") || "";
 
-    // Recover from sessionStorage if URL params are missing
-    const resolvedOrderId = orderId || (typeof window !== "undefined" ? sessionStorage.getItem("checkout_order_id") || "" : "");
-    const resolvedOrderNumber = orderNumberParam || (typeof window !== "undefined" ? sessionStorage.getItem("checkout_order_number") || "" : "");
+    // Recover from sessionStorage after hydration (client-only)
+    const [resolvedOrderId, setResolvedOrderId] = React.useState(orderId);
+    const [resolvedOrderNumber, setResolvedOrderNumber] = React.useState(orderNumberParam);
+    const [hydrated, setHydrated] = React.useState(false);
+
+    React.useEffect(() => {
+        if (!orderId) {
+            const stored = sessionStorage.getItem("checkout_order_id") || "";
+            if (stored) setResolvedOrderId(stored);
+        }
+        if (!orderNumberParam) {
+            const stored = sessionStorage.getItem("checkout_order_number") || "";
+            if (stored) setResolvedOrderNumber(stored);
+        }
+        setHydrated(true);
+    }, [orderId, orderNumberParam]);
 
     const [status, setStatus] = React.useState<StatusData | null>(null);
     const [polling, setPolling] = React.useState(true);
@@ -68,7 +83,7 @@ function SuccessInner() {
     const isCOD = method === "cod";
     const isKonnect = gateway === "konnect" || (!isCOD && !method);
 
-    const MAX_POLLS = 30; // ~60 seconds at 2s intervals
+    const MAX_POLLS = 15; // ~30 seconds at 2s intervals
     const POLL_INTERVAL = 2000;
 
     // Build auth headers
@@ -86,10 +101,27 @@ function SuccessInner() {
         return headers;
     }, []);
 
-    // Poll payment status
+    // For mock payments: call the backend's GET /checkout/success to mark order as paid
+    const triggerMockConfirmation = React.useCallback(async () => {
+        if (!resolvedOrderId || !isMock) return;
+        try {
+            const params = new URLSearchParams({
+                orderId: resolvedOrderId,
+                mock: "true",
+                ...(transactionId ? { transactionId } : {}),
+                ...(gateway ? { gateway } : {}),
+            });
+            await fetch(`${API_BASE_URL}/checkout/success?${params.toString()}`);
+        } catch {
+            // Best effort — polling will pick up the status change
+        }
+    }, [resolvedOrderId, isMock, transactionId, gateway]);
+
+    // Poll payment status — wait until client hydration is done
     React.useEffect(() => {
+        if (!hydrated) return;
+
         if (isCOD) {
-            // Cash on delivery — no polling needed, it's confirmed
             setStatus({
                 paymentStatus: "SUCCESS",
                 orderStatus: "CONFIRMED",
@@ -106,11 +138,18 @@ function SuccessInner() {
 
         let timeoutId: ReturnType<typeof setTimeout>;
         let cancelled = false;
+        let mockConfirmSent = false;
 
         const poll = async () => {
             if (cancelled) return;
 
             try {
+                // On first poll for mock payments, trigger the backend confirmation
+                if (isMock && !mockConfirmSent) {
+                    mockConfirmSent = true;
+                    await triggerMockConfirmation();
+                }
+
                 const headers = await getHeaders();
                 const res = await fetch(
                     `${API_BASE_URL}/checkout/payment/status?orderId=${encodeURIComponent(resolvedOrderId)}`,
@@ -128,11 +167,9 @@ function SuccessInner() {
 
                 if (isFinal) {
                     setPolling(false);
-                    // If payment failed, redirect to fail page
                     if (data.paymentStatus === "FAILED" || data.paymentStatus === "EXPIRED") {
                         router.replace(`/checkout/fail?orderId=${resolvedOrderId}&gateway=${gateway}&reason=${data.paymentStatus.toLowerCase()}`);
                     }
-                    // Clean up sessionStorage
                     try {
                         sessionStorage.removeItem("checkout_order_id");
                         sessionStorage.removeItem("checkout_order_number");
@@ -146,7 +183,6 @@ function SuccessInner() {
                     const next = prev + 1;
                     if (next >= MAX_POLLS) {
                         setPolling(false);
-                        return next;
                     }
                     return next;
                 });
@@ -161,7 +197,7 @@ function SuccessInner() {
             }
         };
 
-        // Start polling after a short delay (webhook might already have processed)
+        // Start polling after a short delay
         timeoutId = setTimeout(poll, 1000);
 
         return () => {
@@ -169,7 +205,7 @@ function SuccessInner() {
             clearTimeout(timeoutId);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [resolvedOrderId, isCOD, gateway]);
+    }, [hydrated, resolvedOrderId, isCOD, gateway, isMock]);
 
     const handleCopyOrderNumber = () => {
         const num = status?.orderNumber || resolvedOrderNumber;

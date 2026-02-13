@@ -99,7 +99,7 @@ export function LedsSubNavbar() {
 
   return (
     <header className="sticky top-16 z-40 bg-white dark:bg-black border-b border-gray-100 dark:border-white/5">
-      <div className="container mx-auto px-4 h-12 flex items-center">
+      <div className="container mx-auto px-4 h-16 flex items-center">
         {/* LED tab with dropdown — sits outside the scrolling nav to avoid overflow clipping */}
         <div
           className="relative flex-shrink-0"

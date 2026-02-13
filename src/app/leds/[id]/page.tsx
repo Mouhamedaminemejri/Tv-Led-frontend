@@ -414,9 +414,9 @@ function BrandModelGroup({ group }: { group: BrandModels }) {
                 </div>
             )}
             <div className="flex flex-wrap gap-1.5">
-                {group.models.map((model) => (
+                {group.models.map((model, mi) => (
                     <span
-                        key={model}
+                        key={`${model}-${mi}`}
                         className="inline-block text-xs bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-md px-2 py-1 text-gray-700 dark:text-gray-300"
                     >
                         {model}
