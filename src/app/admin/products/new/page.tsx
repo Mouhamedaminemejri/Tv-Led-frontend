@@ -18,25 +18,7 @@ export default function NewProductPage() {
         setError(null);
 
         try {
-            // Transform form data to match API
-            const productData = {
-                title: formData.title,
-                reference: formData.reference,
-                brand: formData.brand,
-                price: parseFloat(formData.price) || 0,
-                salePrice: formData.salePrice ? parseFloat(formData.salePrice) : undefined,
-                purchasePrice: formData.purchasePrice ? parseFloat(formData.purchasePrice) : undefined,
-                stock: parseInt(formData.stock) || 0,
-                description: formData.description || undefined,
-                summary: formData.summary || undefined,
-                supplier: formData.supplier || undefined,
-                size: formData.size ? parseInt(formData.size) : undefined,
-                rating: formData.rating ? parseFloat(formData.rating) : 0,
-                tags: formData.tags || [],
-                images: formData.images || [],
-            };
-
-            await AdminService.createProduct(productData);
+            await AdminService.createProduct(formData);
             router.push('/admin/products');
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to create product");

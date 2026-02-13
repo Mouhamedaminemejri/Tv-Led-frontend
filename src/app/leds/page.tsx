@@ -1,45 +1,41 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input"; // Verified import
-import { UserMenu } from "@/components/user-menu";
 
-import { ShoppingCart, Filter, Star, Heart, CheckCircle2, ChevronLeft, ChevronRight, Eye, Home } from "lucide-react";
+import { Star, ChevronLeft, ChevronRight, Loader2, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 
 // Import FilterState from sidebar or define here and export
 import { LedSidebar, type FilterState } from "@/components/led-sidebar";
 import { Footer } from "@/components/footer";
 import { AddToCartDialog } from "@/components/add-to-cart-dialog";
-import { ProductDetailDialog } from "@/components/product-detail-dialog";
-import { SearchAutocomplete } from "@/components/search-autocomplete";
-import { useCart } from "@/context/cart-context"; // Import Hook
+import { LedsBreadcrumb, type BreadcrumbItem } from "@/components/leds/leds-breadcrumb";
 import { ProductService, type LedProduct, type FilterDataProduct } from "@/services/product-service";
 import * as React from "react";
-import { Loader2, AlertCircle } from "lucide-react";
 
-// Sub-components for Header to access Context
-function CartPrice() {
-    const { cartTotal } = useCart();
-    return <span className="text-sm font-bold text-gray-900 dark:text-white">{cartTotal.toFixed(2)} TND</span>;
-}
-
-function CartTriggerBtn() {
-    const { cartCount, openCart } = useCart();
+export default function LedPage() {
     return (
-        <Button size="icon" className="rounded-full bg-blue-600 hover:bg-blue-500 relative" onClick={openCart}>
-            <ShoppingCart className="h-5 w-5" />
-            {cartCount > 0 && (
-                <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center font-bold">
-                    {cartCount}
-                </span>
-            )}
-        </Button>
+        <React.Suspense
+            fallback={
+                <main className="min-h-screen bg-white dark:bg-black text-black dark:text-white">
+                    <div className="container mx-auto px-4 py-12 text-center text-gray-600 dark:text-gray-400">
+                        Loading products...
+                    </div>
+                </main>
+            }
+        >
+            <LedPageInner />
+        </React.Suspense>
     );
 }
 
-export default function LedPage() {
+function LedPageInner() {
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const pathname = usePathname();
+
     // Data State
     const [products, setProducts] = React.useState<LedProduct[]>([]);
     const [filterData, setFilterData] = React.useState<FilterDataProduct[]>([]);
@@ -66,6 +62,37 @@ export default function LedPage() {
         availability: 'all',
         search: '',
     });
+
+    // Sync filters from URL (set by the shop sub-navbar)
+    const q = searchParams.get("q") ?? "";
+    const brandToAdd = searchParams.get("brand");
+
+    React.useEffect(() => {
+        setFilters(prev => (prev.search === q ? prev : { ...prev, search: q }));
+    }, [q]);
+
+    React.useEffect(() => {
+        if (!brandToAdd) return;
+
+        const canonicalBrand = (() => {
+            const target = brandToAdd.trim().toLowerCase();
+            if (!target) return brandToAdd;
+            const matched = filterData.find((item) => (item.brand || "").trim().toLowerCase() === target);
+            return matched?.brand ?? brandToAdd;
+        })();
+
+        setFilters(prev => {
+            const updatedManufacturers = prev.manufacturers.includes(canonicalBrand)
+                ? prev.manufacturers
+                : [...prev.manufacturers, canonicalBrand];
+            return {
+                ...prev,
+                manufacturers: updatedManufacturers,
+                search: '',
+            };
+        });
+
+    }, [brandToAdd, filterData]);
 
     const [sortOption, setSortOption] = React.useState('relevance');
     const loadingRef = React.useRef(false);
@@ -210,6 +237,22 @@ export default function LedPage() {
             };
         }
 
+        const makeFacetId = (value: string) => {
+            const slug =
+                value
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, "-")
+                    .replace(/(^-|-$)/g, "") || "item";
+
+            // Stable hash based on original string (case-sensitive)
+            let hash = 0;
+            for (let i = 0; i < value.length; i++) {
+                hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+            }
+            return `${slug}-${hash.toString(36)}`;
+        };
+
         // Get ALL unique brands and sizes from filter-data (complete list)
         const allBrands = new Set(filterData.map(item => item.brand));
         const allSizes = new Set(filterData.map(item => item.size?.toString() ?? '0'));
@@ -259,7 +302,7 @@ export default function LedPage() {
 
         return {
             manufacturers: Array.from(allBrands).map(brand => ({
-                id: brand.toLowerCase(),
+                id: makeFacetId(brand),
                 label: brand,
                 count: manufacturerCounts[brand] || 0
             })).sort((a, b) => b.count - a.count),
@@ -285,8 +328,10 @@ export default function LedPage() {
             
             // Remove selected manufacturers that have 0 count
             const validManufacturers = prev.manufacturers.filter(m => {
-                const facet = facets.manufacturers.find(f => f.label === m);
-                return facet && facet.count > 0;
+                const mKey = (m || "").trim().toLowerCase();
+                const facet = facets.manufacturers.find(f => (f.label || "").trim().toLowerCase() === mKey);
+                // Keep the filter if the facet exists (even with 0 count) — user can uncheck it manually
+                return !!facet;
             });
             if (validManufacturers.length !== prev.manufacturers.length) {
                 updated.manufacturers = validManufacturers;
@@ -323,65 +368,66 @@ export default function LedPage() {
         });
     }, [facets]);
 
+    // ── Build a shared smart label from active filters ──────────────────────
+    const filterLabel = React.useMemo(() => {
+        const parts: string[] = [];
+
+        // Brand names
+        if (filters.manufacturers.length > 0) {
+            parts.push(filters.manufacturers.length <= 2
+                ? filters.manufacturers.join(" & ")
+                : `${filters.manufacturers[0]} +${filters.manufacturers.length - 1}`);
+        }
+
+        // Diagonal sizes
+        if (filters.diagonals.length > 0) {
+            const sizeLabels = filters.diagonals.map(d => d === "0" ? "Universal" : `${d}\u2033`);
+            parts.push(sizeLabels.length <= 2
+                ? sizeLabels.join(", ")
+                : `${sizeLabels[0]} +${sizeLabels.length - 1}`);
+        }
+
+        // Backlight type
+        if (filters.backlightTypes.length > 0) {
+            const typeLabels = filters.backlightTypes.map(t => t === "direct" ? "Direct LED" : t);
+            parts.push(typeLabels.join(", "));
+        }
+
+        // Search query
+        if (filters.search) {
+            parts.push(`"${filters.search}"`);
+        }
+
+        const extras: string[] = [];
+        if (filters.availability === "instock") extras.push("In stock");
+        if (filters.videoGuide) extras.push("Video guide");
+
+        const hasActiveFilter = parts.length > 0 || extras.length > 0;
+        const suffix = [parts.join(" "), "LED Backlights"].filter(Boolean).join(" ");
+        const fullLabel = extras.length > 0 ? `${suffix} (${extras.join(", ")})` : suffix;
+
+        return { fullLabel, hasActiveFilter };
+    }, [filters.manufacturers, filters.diagonals, filters.backlightTypes, filters.search, filters.availability, filters.videoGuide]);
+
+    const totalCount = pagination?.total ?? filteredProducts.length;
+
+    const breadcrumbItems = React.useMemo<BreadcrumbItem[]>(() => {
+        const items: BreadcrumbItem[] = [{ label: "Home", href: "/" }];
+
+        if (filterLabel.hasActiveFilter) {
+            items.push({ label: "LED backlight", href: "/leds" });
+            items.push({ label: `${filterLabel.fullLabel} (${totalCount})` });
+        } else {
+            items.push({ label: `LED backlight (${totalCount})` });
+        }
+
+        return items;
+    }, [filterLabel, totalCount]);
+
     return (
         <main className="min-h-screen bg-white dark:bg-black text-black dark:text-white">
-            {/* Header for Store Section */}
-            <header className="sticky top-0 z-50 border-b border-gray-200 dark:border-white/10 bg-white/80 dark:bg-black/80 backdrop-blur-xl">
-                <div className="container mx-auto px-4 h-20 flex items-center justify-between gap-4">
-                    {/* Breadcrumb Navigation */}
-                    <nav className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 flex-shrink-0">
-                        <Link href="/" className="hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1">
-                            <Home className="h-4 w-4" />
-                            <span className="hidden sm:inline">Home</span>
-                        </Link>
-                        <span>/</span>
-                        <span className="text-gray-900 dark:text-white font-medium">Products</span>
-                    </nav>
-
-                    <div className="flex-1 max-w-2xl relative">
-                        <SearchAutocomplete
-                            value={filters.search}
-                            onChange={(value) => setFilters(prev => ({ ...prev, search: value }))}
-                            onSelect={(value, type) => {
-                                if (type === 'brand') {
-                                    // If brand is selected, add it to manufacturers filter and clear search
-                                    setFilters(prev => {
-                                        const updatedManufacturers = prev.manufacturers.includes(value)
-                                            ? prev.manufacturers
-                                            : [...prev.manufacturers, value];
-                                        return {
-                                            ...prev,
-                                            manufacturers: updatedManufacturers,
-                                            search: '' // Clear search when brand is selected
-                                        };
-                                    });
-                                } else {
-                                    // For references and titles, use search field
-                                    setFilters(prev => ({ ...prev, search: value }));
-                                }
-                                setCurrentPage(1); // Reset to first page when selecting a suggestion
-                            }}
-                            placeholder="Search by TV Model (e.g. UE43...), Part Number, or Brand..."
-                        />
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                        {/* User Menu */}
-                        <UserMenu />
-                        
-                        {/* Cart */}
-                        <div className="flex items-center gap-3">
-                            <div className="hidden sm:flex flex-col items-end">
-                                <span className="text-xs text-gray-600 dark:text-gray-400">Your Basket</span>
-                                <CartPrice />
-                            </div>
-                            <CartTriggerBtn />
-                        </div>
-                    </div>
-                </div>
-            </header>
-
-            <div className="container mx-auto px-4 py-8">
+            <div className="container mx-auto px-4 pt-2 pb-8">
+                <LedsBreadcrumb items={breadcrumbItems} />
 
                 <div className="flex flex-col lg:flex-row gap-8">
                     {/* Sidebar Filters - Only show when we have products */}
@@ -396,7 +442,10 @@ export default function LedPage() {
                     {/* Product Grid */}
                     <div className="flex-1">
                         <div className="flex items-center justify-between mb-6">
-                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">LED Backlights <span className="text-gray-600 dark:text-gray-400 text-lg font-normal">({pagination?.total ?? filteredProducts.length} Products)</span></h1>
+                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+                                {filterLabel.fullLabel}
+                                {" "}<span className="text-gray-600 dark:text-gray-400 text-lg font-normal">({pagination?.total ?? filteredProducts.length} Products)</span>
+                            </h1>
                             <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                                 Sort by:
                                 <select
@@ -411,9 +460,19 @@ export default function LedPage() {
                             </div>
                         </div>
 
+                        {error && (
+                            <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-3">
+                                <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                                <div className="text-sm text-red-700 dark:text-red-300">{error}</div>
+                            </div>
+                        )}
+
                         {loading ? (
                             <div className="text-center py-20 bg-gray-50 dark:bg-white/5 rounded-2xl border border-gray-200 dark:border-white/10">
-                                <p className="text-gray-600 dark:text-gray-400 text-lg">Loading products...</p>
+                                <div className="flex flex-col items-center gap-3">
+                                    <Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-400" />
+                                    <p className="text-gray-600 dark:text-gray-400 text-lg">Loading products...</p>
+                                </div>
                             </div>
                         ) : filteredProducts.length === 0 && pagination && pagination.total === 0 ? (
                             <div className="text-center py-20 bg-gray-50 dark:bg-white/5 rounded-2xl border border-gray-200 dark:border-white/10">
@@ -421,14 +480,17 @@ export default function LedPage() {
                                 <Button
                                     variant="link"
                                     className="text-gray-900 dark:text-gray-300 mt-2"
-                                    onClick={() => setFilters({
-                                        manufacturers: [],
-                                        diagonals: [],
-                                        backlightTypes: [],
-                                        videoGuide: false,
-                                        availability: 'all',
-                                        search: '',
-                                    })}
+                                    onClick={() => {
+                                        setFilters({
+                                            manufacturers: [],
+                                            diagonals: [],
+                                            backlightTypes: [],
+                                            videoGuide: false,
+                                            availability: 'all',
+                                            search: '',
+                                        });
+                                        router.replace(pathname, { scroll: false });
+                                    }}
                                 >
                                     Clear all filters
                                 </Button>
@@ -438,110 +500,131 @@ export default function LedPage() {
                                 <p className="text-gray-600 dark:text-gray-400 text-lg">No products available.</p>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                                {filteredProducts.map(product => (
-                                    <div key={product.id} className="group relative bg-gray-50 dark:bg-white/5 rounded-2xl border border-gray-200 dark:border-white/10 overflow-hidden shadow-sm dark:shadow-none hover:shadow-lg dark:hover:shadow-2xl transition-all duration-300">
-                                        {/* Image Area */}
-                                        <Link href={`/leds/${product.id}`} className="block">
-                                            <div className="aspect-[4/3] bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-900 dark:to-black relative  flex items-center justify-center">
-                                                {/* Badge */}
-                                                {product.tags.includes("Best Seller") && (
-                                                    <div className="absolute top-4 left-4 z-10 bg-yellow-500 text-black text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 shadow-lg">
-                                                        <Star className="h-3 w-3 fill-black" /> Best Seller
-                                                    </div>
-                                                )}
-                                                {product.stock === 0 && (
-                                                    <div className="absolute inset-0 bg-gray-900/60 dark:bg-black/60 z-20 flex items-center justify-center backdrop-blur-sm">
-                                                        <span className="text-white dark:text-white font-bold tracking-widest uppercase border-2 border-white px-4 py-2">Out of Stock</span>
-                                                    </div>
-                                                )}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                {filteredProducts.map((product, idx) => {
+                                    const sizeLabel =
+                                        product.size != null && product.size > 0 ? `${product.size}"` : "Universal";
 
-                                                <div className="relative w-full h-full transform group-hover:scale-105 transition-transform duration-500">
+                                    const showTop = idx < 3;
+                                    const showMostWanted = product.tags.includes("Best Seller");
+                                    const showVideoGuide = product.tags.includes("Technician Choice");
+
+                                    return (
+                                        <div
+                                            key={product.id}
+                                            className="bg-white dark:bg-black border border-gray-200 dark:border-white/10 rounded-none overflow-hidden hover-draw-border hover-draw-border-gray transition-transform duration-200 hover:-translate-y-0.5"
+                                        >
+                                            {/* Image */}
+                                            <Link href={`/leds/${product.id}`} className="block">
+                                                <div className="relative aspect-square bg-gray-100 dark:bg-white/5 border-b border-gray-200 dark:border-white/10">
                                                     <Image
-                                                        src={product.images?.[0] || '/led-product.png'}
+                                                        src={product.images?.[0] || "/led-product.png"}
                                                         alt={product.title}
                                                         fill
-                                                        className="object-cover"
+                                                        className="object-contain p-4"
                                                     />
-                                                </div>
 
-                                                <div className="absolute top-4 right-4 flex flex-col gap-2 z-30">
-                                                    <button 
-                                                        className="p-2 rounded-full bg-white/80 dark:bg-black/50 text-gray-700 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-black transition-colors opacity-0 group-hover:opacity-100 transform translate-y-2 group-hover:translate-y-0 duration-300" 
-                                                        title="Add to Wishlist"
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            // Wishlist functionality can be added here
-                                                        }}
-                                                    >
-                                                        <Heart className="h-4 w-4" />
-                                                    </button>
-                                                    <ProductDetailDialog product={product}>
-                                                        <button 
-                                                            className="p-2 rounded-full bg-white/80 dark:bg-black/50 text-gray-700 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-black transition-colors opacity-0 group-hover:opacity-100 transform translate-y-2 group-hover:translate-y-0 duration-300" 
-                                                            title="View Details"
-                                                            onClick={(e) => {
-                                                                e.preventDefault();
-                                                                e.stopPropagation();
-                                                            }}
-                                                        >
-                                                            <Eye className="h-4 w-4" />
-                                                        </button>
-                                                    </ProductDetailDialog>
-                                                </div>
-                                            </div>
-                                        </Link>
+                                                    {(showTop || showMostWanted || showVideoGuide) && (
+                                                        <div className="absolute top-2 left-2 space-y-1">
+                                                            {showTop && (
+                                                                <div className="bg-black/80 text-white text-[10px] font-bold px-2 py-1 rounded-sm w-fit">
+                                                                    TOP #{idx + 1}
+                                                                </div>
+                                                            )}
+                                                            {showMostWanted && (
+                                                                <div className="bg-amber-700 text-white text-[10px] font-bold px-2 py-1 rounded-sm w-fit">
+                                                                    MOST WANTED
+                                                                </div>
+                                                            )}
+                                                            {showVideoGuide && (
+                                                                <div className="bg-gray-800 text-white text-[10px] font-bold px-2 py-1 rounded-sm w-fit">
+                                                                    VIDEO GUIDE
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
 
-                                        {/* Content */}
-                                        <div className="p-5">
-                                            <Link href={`/leds/${product.id}`} className="block">
-                                                <div className="text-xs text-gray-600 dark:text-gray-400 mb-1 font-medium">{product.brand} • {product.reference}</div>
-                                                <h3 className="font-bold text-lg mb-2 leading-tight text-gray-900 dark:text-white group-hover:text-gray-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 min-h-[3rem]">
-                                                    {product.title}
-                                                </h3>
-
-                                                <div className="flex items-center gap-2 mb-4">
-                                                    <div className="flex text-yellow-500 dark:text-yellow-500">
-                                                        {[...Array(5)].map((_, i) => (
-                                                            <Star key={i} className={`h-3 w-3 ${i < product.rating ? 'fill-current' : 'text-gray-300 dark:text-gray-700'}`} />
-                                                        ))}
-                                                    </div>
-                                                    <span className="text-xs text-gray-600 dark:text-gray-400">({product.id.charCodeAt(0) * 2 + 5} reviews)</span>
+                                                    {product.stock === 0 && (
+                                                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                                            <span className="text-white font-bold tracking-widest uppercase text-xs">
+                                                                Out of stock
+                                                            </span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </Link>
 
-                                            <div className="flex items-center justify-between mt-auto">
+                                            {/* Content */}
+                                            <div className="p-3 text-center">
+                                                {/* Rating */}
+                                                <div className="flex justify-center text-yellow-500 mb-2">
+                                                    {[...Array(5)].map((_, i) => (
+                                                        <Star
+                                                            key={i}
+                                                            className={`h-4 w-4 ${i < product.rating ? "fill-current" : "text-gray-300 dark:text-gray-700"}`}
+                                                        />
+                                                    ))}
+                                                </div>
+
                                                 <Link href={`/leds/${product.id}`} className="block">
-                                                    <div>
-                                                        <div className="text-2xl font-bold text-gray-900 dark:text-white">{product.price.toFixed(2)} <span className="text-sm font-normal text-gray-600 dark:text-gray-400">TND</span></div>
-                                                        {product.stock > 0 && product.stock < 5 ? (
-                                                            <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">Only {product.stock} left in stock</span>
-                                                        ) : product.stock > 0 ? (
-                                                            <span className="text-xs text-gray-700 dark:text-gray-300 font-medium flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> In Stock</span>
-                                                        ) : (
-                                                            <span className="text-xs text-gray-600 dark:text-gray-400 font-medium">Restocking soon</span>
-                                                        )}
-                                                    </div>
+                                                    <h3 className="font-bold text-sm text-gray-900 dark:text-white leading-snug line-clamp-2 min-h-[2.5rem]">
+                                                        {product.title}
+                                                    </h3>
                                                 </Link>
 
-                                                <div onClick={(e) => e.stopPropagation()}>
+                                                {/* Size pill */}
+                                                <div className="mt-2 flex justify-center">
+                                                    <span className="text-xs px-2 py-0.5 rounded border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300">
+                                                        {sizeLabel}
+                                                    </span>
+                                                </div>
+
+                                                {/* Stock line */}
+                                                <div className="mt-3 text-xs">
+                                                    {product.stock > 5 ? (
+                                                        <span className="text-green-700 dark:text-green-400 font-medium">
+                                                            In stock: more than 5 pieces
+                                                        </span>
+                                                    ) : product.stock > 0 ? (
+                                                        <span className="text-green-700 dark:text-green-400 font-medium">
+                                                            In stock: {product.stock}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-red-600 dark:text-red-400 font-medium">
+                                                            Out of stock
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                {/* Price */}
+                                                <div className="mt-1 text-lg font-extrabold text-gray-900 dark:text-white">
+                                                    {product.price.toFixed(2)}{" "}
+                                                    <span className="text-sm font-semibold text-gray-600 dark:text-gray-400">
+                                                        TND
+                                                    </span>
+                                                </div>
+
+                                                {/* CTA */}
+                                                <div className="mt-4" onClick={(e) => e.stopPropagation()}>
                                                     {product.stock > 0 ? (
                                                         <AddToCartDialog product={product}>
-                                                            <Button className="rounded-xl shadow-lg bg-gray-900 dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200">
-                                                                Add to Cart
+                                                            <Button className="w-full rounded-none bg-green-700 hover:bg-green-600 text-white font-semibold">
+                                                                Add to cart
                                                             </Button>
                                                         </AddToCartDialog>
                                                     ) : (
-                                                        <Button disabled className="rounded-xl shadow-lg opacity-50">
-                                                            Add to Cart
+                                                        <Button
+                                                            disabled
+                                                            className="w-full rounded-none bg-green-700 text-white font-semibold opacity-50"
+                                                        >
+                                                            Add to cart
                                                         </Button>
                                                     )}
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                         

@@ -5,23 +5,34 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { X, Upload, Plus } from "lucide-react";
+import { X, Upload, Plus, ChevronLeft, ChevronRight, ZoomIn } from "lucide-react";
 import Image from "next/image";
+import { ProductService } from "@/services/product-service";
+import {
+    Dialog,
+    DialogContent,
+    DialogTitle,
+} from "@/components/ui/dialog";
 
 interface ProductFormData {
     number: string;
     reference: string;
     brand: string;
     title: string;
-    summary: string;
     purchasePrice: string;
     supplier: string;
     salePrice: string;
     price: string;
-    description: string;
-    size: string;
+    tvBacklightType: string;
+    tvPanelType: string;
+    tvSizeInch: string;
+    stripCount: string;
+    ledCount: string;
+    voltage: string;
+    length: string;
     stock: string;
     rating: string;
+    config: string;
     images: string[];
     tags: string[];
 }
@@ -39,28 +50,54 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
         reference: initialData?.reference || "",
         brand: initialData?.brand || "",
         title: initialData?.title || "",
-        summary: initialData?.summary || "",
         purchasePrice: initialData?.purchasePrice || "",
         supplier: initialData?.supplier || "",
         salePrice: initialData?.salePrice || "",
         price: initialData?.price || "",
-        description: initialData?.description || "",
-        size: initialData?.size || "",
+        tvBacklightType: initialData?.tvBacklightType || "",
+        tvPanelType: initialData?.tvPanelType || "",
+        tvSizeInch: initialData?.tvSizeInch || "",
+        stripCount: initialData?.stripCount || "",
+        ledCount: initialData?.ledCount || "",
+        voltage: initialData?.voltage || "",
+        length: initialData?.length || "",
         stock: initialData?.stock || "",
         rating: initialData?.rating || "0",
+        config: initialData?.config || "",
         images: initialData?.images || [],
         tags: initialData?.tags || [],
     });
 
     const [newTag, setNewTag] = React.useState("");
-    const [imageUrls, setImageUrls] = React.useState<string[]>(formData.images);
     const [uploadingImages, setUploadingImages] = React.useState(false);
+    const [validationError, setValidationError] = React.useState<string | null>(null);
+    const [brandSuggestions, setBrandSuggestions] = React.useState<string[]>([]);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-    // Update imageUrls when formData.images changes
+    // Image preview dialog
+    const [previewOpen, setPreviewOpen] = React.useState(false);
+    const [previewIndex, setPreviewIndex] = React.useState(0);
+
+    const openPreview = (index: number) => {
+        setPreviewIndex(index);
+        setPreviewOpen(true);
+    };
+
+    const prevImage = () => {
+        setPreviewIndex(prev => (prev - 1 + formData.images.length) % formData.images.length);
+    };
+
+    const nextImage = () => {
+        setPreviewIndex(prev => (prev + 1) % formData.images.length);
+    };
+
     React.useEffect(() => {
-        setImageUrls(formData.images);
-    }, [formData.images]);
+        const loadBrandSuggestions = async () => {
+            const brands = await ProductService.getAllBrands();
+            setBrandSuggestions(brands);
+        };
+        loadBrandSuggestions();
+    }, []);
 
     const handleInputChange = (field: keyof ProductFormData, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -134,22 +171,49 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        
+        setValidationError(null);
+
+        const priceValue = Number(formData.price);
+        if (!Number.isFinite(priceValue) || priceValue <= 0) {
+            setValidationError("Price must be greater than 0.");
+            return;
+        }
+
+        const ratingValue = formData.rating === "" ? 0 : Number(formData.rating);
+        if (!Number.isFinite(ratingValue) || ratingValue < 0 || ratingValue > 5) {
+            setValidationError("Rating must be between 0 and 5.");
+            return;
+        }
+
+        if (formData.config.trim()) {
+            try {
+                JSON.parse(formData.config);
+            } catch {
+                setValidationError("Config must be a valid JSON string.");
+                return;
+            }
+        }
+
         // Convert form data to API format
         const apiData = {
             number: formData.number || null,
             reference: formData.reference,
             brand: formData.brand,
             title: formData.title,
-            summary: formData.summary || null,
-            purchasePrice: formData.purchasePrice ? parseFloat(formData.purchasePrice) : null,
-            supplier: formData.supplier || null,
-            salePrice: parseFloat(formData.salePrice) || 0,
-            price: parseFloat(formData.price) || 0,
-            description: formData.description || null,
-            size: formData.size ? parseFloat(formData.size) : null,
+            purchasePrice: formData.purchasePrice ? Number(formData.purchasePrice) : undefined,
+            supplier: formData.supplier,
+            salePrice: formData.salePrice ? Number(formData.salePrice) : undefined,
+            price: priceValue,
+            tvBacklightType: formData.tvBacklightType || undefined,
+            tvPanelType: formData.tvPanelType || undefined,
+            tvSizeInch: formData.tvSizeInch ? Number(formData.tvSizeInch) : undefined,
+            stripCount: formData.stripCount || undefined,
+            ledCount: formData.ledCount || undefined,
+            voltage: formData.voltage ? Number(formData.voltage) : undefined,
+            length: formData.length || undefined,
             stock: parseInt(formData.stock) || 0,
-            rating: parseInt(formData.rating) || 0,
+            rating: ratingValue,
+            config: formData.config.trim() || undefined,
             images: formData.images.filter(img => img.trim() !== ""),
             tags: formData.tags,
         };
@@ -159,6 +223,11 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
 
     return (
         <form id="product-form" onSubmit={handleSubmit} className="space-y-6">
+            {validationError && (
+                <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+                    {validationError}
+                </div>
+            )}
             {/* Basic Information */}
             <div className="bg-gray-50 dark:bg-white/5 rounded-xl border border-gray-200 dark:border-white/10 p-6">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Basic Information</h2>
@@ -180,10 +249,16 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                             id="brand"
                             value={formData.brand}
                             onChange={(e) => handleInputChange("brand", e.target.value)}
+                            list="brand-suggestions"
                             className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
                             placeholder="e.g., Samsung"
                             required
                         />
+                        <datalist id="brand-suggestions">
+                            {brandSuggestions.map((brand) => (
+                                <option key={brand} value={brand} />
+                            ))}
+                        </datalist>
                     </div>
                     <div className="md:col-span-2">
                         <Label htmlFor="title" className="text-gray-900 dark:text-white">Title *</Label>
@@ -194,28 +269,6 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                             className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
                             placeholder="Product title"
                             required
-                        />
-                    </div>
-                    <div className="md:col-span-2">
-                        <Label htmlFor="summary" className="text-gray-900 dark:text-white">Summary</Label>
-                        <Textarea
-                            id="summary"
-                            value={formData.summary}
-                            onChange={(e) => handleInputChange("summary", e.target.value)}
-                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
-                            placeholder="Short product summary"
-                            rows={2}
-                        />
-                    </div>
-                    <div className="md:col-span-2">
-                        <Label htmlFor="description" className="text-gray-900 dark:text-white">Description</Label>
-                        <Textarea
-                            id="description"
-                            value={formData.description}
-                            onChange={(e) => handleInputChange("description", e.target.value)}
-                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
-                            placeholder="Full product description"
-                            rows={4}
                         />
                     </div>
                 </div>
@@ -255,6 +308,7 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                             id="price"
                             type="number"
                             step="0.01"
+                            min="0.01"
                             value={formData.price}
                             onChange={(e) => handleInputChange("price", e.target.value)}
                             className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
@@ -275,12 +329,12 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                         />
                     </div>
                     <div>
-                        <Label htmlFor="size" className="text-gray-900 dark:text-white">Size (inches)</Label>
+                        <Label htmlFor="tvSizeInch" className="text-gray-900 dark:text-white">TV Size (inches)</Label>
                         <Input
-                            id="size"
+                            id="tvSizeInch"
                             type="number"
-                            value={formData.size}
-                            onChange={(e) => handleInputChange("size", e.target.value)}
+                            value={formData.tvSizeInch}
+                            onChange={(e) => handleInputChange("tvSizeInch", e.target.value)}
                             className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
                             placeholder="e.g., 43"
                         />
@@ -325,6 +379,79 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                             placeholder="Supplier name"
                         />
                     </div>
+                    <div>
+                        <Label htmlFor="tvBacklightType" className="text-gray-900 dark:text-white">TV Backlight Type</Label>
+                        <Input
+                            id="tvBacklightType"
+                            value={formData.tvBacklightType}
+                            onChange={(e) => handleInputChange("tvBacklightType", e.target.value)}
+                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
+                            placeholder="e.g., Direct LED"
+                        />
+                    </div>
+                    <div>
+                        <Label htmlFor="tvPanelType" className="text-gray-900 dark:text-white">TV Panel Type</Label>
+                        <Input
+                            id="tvPanelType"
+                            value={formData.tvPanelType}
+                            onChange={(e) => handleInputChange("tvPanelType", e.target.value)}
+                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
+                            placeholder="e.g., IPS"
+                        />
+                    </div>
+                    <div>
+                        <Label htmlFor="stripCount" className="text-gray-900 dark:text-white">Strip Count</Label>
+                        <Input
+                            id="stripCount"
+                            value={formData.stripCount}
+                            onChange={(e) => handleInputChange("stripCount", e.target.value)}
+                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
+                            placeholder="e.g., 8"
+                        />
+                    </div>
+                    <div>
+                        <Label htmlFor="ledCount" className="text-gray-900 dark:text-white">LED Count</Label>
+                        <Input
+                            id="ledCount"
+                            value={formData.ledCount}
+                            onChange={(e) => handleInputChange("ledCount", e.target.value)}
+                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
+                            placeholder="e.g., 96"
+                        />
+                    </div>
+                    <div>
+                        <Label htmlFor="voltage" className="text-gray-900 dark:text-white">Voltage</Label>
+                        <Input
+                            id="voltage"
+                            type="number"
+                            step="0.01"
+                            value={formData.voltage}
+                            onChange={(e) => handleInputChange("voltage", e.target.value)}
+                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
+                            placeholder="e.g., 12"
+                        />
+                    </div>
+                    <div>
+                        <Label htmlFor="length" className="text-gray-900 dark:text-white">Length</Label>
+                        <Input
+                            id="length"
+                            value={formData.length}
+                            onChange={(e) => handleInputChange("length", e.target.value)}
+                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white"
+                            placeholder="e.g., 1200mm"
+                        />
+                    </div>
+                    <div className="md:col-span-2">
+                        <Label htmlFor="config" className="text-gray-900 dark:text-white">Config (JSON string)</Label>
+                        <Textarea
+                            id="config"
+                            value={formData.config}
+                            onChange={(e) => handleInputChange("config", e.target.value)}
+                            className="mt-1 bg-white dark:bg-black border-gray-300 dark:border-white/10 text-gray-900 dark:text-white font-mono text-xs"
+                            placeholder='e.g., {"discountedPrice":79.9,"deliveryMethods":[]}'
+                            rows={4}
+                        />
+                    </div>
                 </div>
             </div>
 
@@ -367,14 +494,21 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                 <div className="space-y-4">
                     {formData.images.map((image, index) => (
                         <div key={index} className="flex items-start gap-4 p-4 bg-white dark:bg-black rounded-lg border border-gray-200 dark:border-white/10">
-                            <div className="relative w-24 h-24 bg-gray-100 dark:bg-white/10 rounded-lg overflow-hidden flex-shrink-0">
+                            <button
+                                type="button"
+                                onClick={() => openPreview(index)}
+                                className="relative w-24 h-24 bg-gray-100 dark:bg-white/10 rounded-lg overflow-hidden flex-shrink-0 group cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                            >
                                 <Image
                                     src={image || '/led-product.png'}
                                     alt={`Product image ${index + 1}`}
                                     fill
                                     className="object-cover"
                                 />
-                            </div>
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                                    <ZoomIn className="h-6 w-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </div>
+                            </button>
                             <div className="flex-1">
                                 <Input
                                     value={image}
@@ -400,6 +534,86 @@ export function ProductForm({ initialData, onSubmit, isLoading = false, submitBu
                         </p>
                     )}
                 </div>
+
+                {/* Image Preview Dialog */}
+                <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+                    <DialogContent className="max-w-4xl w-[95vw] p-0 bg-black/95 border-white/10 overflow-hidden">
+                        <DialogTitle className="sr-only">Image Preview</DialogTitle>
+                        <div className="relative flex flex-col items-center">
+                            {/* Close button */}
+                            <button
+                                type="button"
+                                onClick={() => setPreviewOpen(false)}
+                                className="absolute top-3 right-3 z-10 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                            >
+                                <X className="h-5 w-5 text-white" />
+                            </button>
+
+                            {/* Image counter */}
+                            <div className="absolute top-3 left-3 z-10 px-3 py-1 rounded-full bg-white/10 text-white text-sm">
+                                {previewIndex + 1} / {formData.images.length}
+                            </div>
+
+                            {/* Main image */}
+                            <div className="relative w-full" style={{ minHeight: "60vh" }}>
+                                {formData.images[previewIndex] && (
+                                    <Image
+                                        src={formData.images[previewIndex]}
+                                        alt={`Preview ${previewIndex + 1}`}
+                                        fill
+                                        className="object-contain"
+                                        sizes="95vw"
+                                    />
+                                )}
+                            </div>
+
+                            {/* Navigation arrows */}
+                            {formData.images.length > 1 && (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={prevImage}
+                                        className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/25 transition-colors"
+                                    >
+                                        <ChevronLeft className="h-6 w-6 text-white" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={nextImage}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/10 hover:bg-white/25 transition-colors"
+                                    >
+                                        <ChevronRight className="h-6 w-6 text-white" />
+                                    </button>
+                                </>
+                            )}
+
+                            {/* Thumbnail strip */}
+                            {formData.images.length > 1 && (
+                                <div className="flex items-center gap-2 p-3 overflow-x-auto w-full justify-center bg-black/50">
+                                    {formData.images.map((img, i) => (
+                                        <button
+                                            key={i}
+                                            type="button"
+                                            onClick={() => setPreviewIndex(i)}
+                                            className={`relative w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-all ${
+                                                i === previewIndex
+                                                    ? "border-blue-500 ring-2 ring-blue-500/30"
+                                                    : "border-transparent opacity-60 hover:opacity-100"
+                                            }`}
+                                        >
+                                            <Image
+                                                src={img || '/led-product.png'}
+                                                alt={`Thumb ${i + 1}`}
+                                                fill
+                                                className="object-cover"
+                                            />
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </DialogContent>
+                </Dialog>
             </div>
 
             {/* Tags */}

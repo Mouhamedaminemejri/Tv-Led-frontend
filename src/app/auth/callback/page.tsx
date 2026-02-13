@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 // OAuth Callback Page Component
 // ============================================================================
 
-export default function OAuthCallbackPage() {
+function OAuthCallbackInner() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { handleOAuthCallback } = useAuth();
@@ -127,5 +127,22 @@ export default function OAuthCallbackPage() {
                 </p>
             </div>
         </AuthLayout>
+    );
+}
+
+export default function OAuthCallbackPage() {
+    return (
+        <React.Suspense
+            fallback={
+                <AuthLayout title="Signing you in..." subtitle="" showBackLink={false}>
+                    <div className="text-center py-12">
+                        <Loader2 className="h-12 w-12 animate-spin text-blue-600 dark:text-blue-400 mx-auto mb-6" />
+                        <p className="text-gray-600 dark:text-gray-400">Please wait while we complete your sign in...</p>
+                    </div>
+                </AuthLayout>
+            }
+        >
+            <OAuthCallbackInner />
+        </React.Suspense>
     );
 }

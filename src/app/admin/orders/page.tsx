@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 const ORDER_STATUSES: { value: OrderStatus | ""; label: string }[] = [
     { value: "", label: "All Status" },
     { value: "PENDING", label: "Pending" },
+    { value: "PICKUP", label: "Pickup" },
     { value: "CONFIRMED", label: "Confirmed" },
     { value: "PROCESSING", label: "Processing" },
     { value: "SHIPPED", label: "Shipped" },
@@ -36,6 +37,8 @@ const getStatusConfig = (status: OrderStatus) => {
     switch (status) {
         case "PENDING":
             return { icon: Clock, color: "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400" };
+        case "PICKUP":
+            return { icon: Package, color: "bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400" };
         case "CONFIRMED":
             return { icon: CheckCircle, color: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400" };
         case "PROCESSING":
@@ -66,20 +69,26 @@ export default function AdminOrdersPage() {
     } | null>(null);
     
     // Filters
-    const [searchQuery, setSearchQuery] = React.useState("");
+    const [clientName, setClientName] = React.useState("");
+    const [email, setEmail] = React.useState("");
+    const [phoneNumber, setPhoneNumber] = React.useState("");
     const [statusFilter, setStatusFilter] = React.useState<OrderStatus | "">("");
     
     const ITEMS_PER_PAGE = 20;
 
     // Debounced search
-    const [debouncedSearch, setDebouncedSearch] = React.useState("");
+    const [debouncedClientName, setDebouncedClientName] = React.useState("");
+    const [debouncedEmail, setDebouncedEmail] = React.useState("");
+    const [debouncedPhoneNumber, setDebouncedPhoneNumber] = React.useState("");
     React.useEffect(() => {
         const timer = setTimeout(() => {
-            setDebouncedSearch(searchQuery);
+            setDebouncedClientName(clientName);
+            setDebouncedEmail(email);
+            setDebouncedPhoneNumber(phoneNumber);
             setCurrentPage(1);
         }, 300);
         return () => clearTimeout(timer);
-    }, [searchQuery]);
+    }, [clientName, email, phoneNumber]);
 
     // Load orders
     const loadOrders = React.useCallback(async () => {
@@ -89,21 +98,12 @@ export default function AdminOrdersPage() {
             
             const response = await AdminService.getOrders(currentPage, ITEMS_PER_PAGE, {
                 status: statusFilter || undefined,
+                clientName: debouncedClientName || undefined,
+                email: debouncedEmail || undefined,
+                phoneNumber: debouncedPhoneNumber || undefined,
             });
-            
-            // Filter by search locally (backend might not support search)
-            let filteredOrders = response.data;
-            if (debouncedSearch) {
-                const search = debouncedSearch.toLowerCase();
-                filteredOrders = filteredOrders.filter(order =>
-                    order.orderNumber.toLowerCase().includes(search) ||
-                    order.fullName.toLowerCase().includes(search) ||
-                    order.email.toLowerCase().includes(search) ||
-                    order.phoneNumber?.includes(search)
-                );
-            }
-            
-            setOrders(filteredOrders);
+
+            setOrders(response.data);
             setPagination({
                 total: response.total,
                 page: response.page,
@@ -117,7 +117,7 @@ export default function AdminOrdersPage() {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, debouncedSearch, statusFilter]);
+    }, [currentPage, debouncedClientName, debouncedEmail, debouncedPhoneNumber, statusFilter]);
 
     React.useEffect(() => {
         loadOrders();
@@ -125,12 +125,14 @@ export default function AdminOrdersPage() {
 
     // Reset filters
     const resetFilters = () => {
-        setSearchQuery("");
+        setClientName("");
+        setEmail("");
+        setPhoneNumber("");
         setStatusFilter("");
         setCurrentPage(1);
     };
 
-    const hasActiveFilters = searchQuery || statusFilter;
+    const hasActiveFilters = clientName || email || phoneNumber || statusFilter;
 
     const formatDate = (date: string) => {
         return new Date(date).toLocaleDateString('en-US', {
@@ -162,16 +164,31 @@ export default function AdminOrdersPage() {
             <div className="p-4 sm:p-6 lg:p-8 space-y-6">
                 {/* Filters */}
                 <div className="bg-white dark:bg-white/5 rounded-xl border border-gray-200 dark:border-white/10 p-4">
-                    <div className="flex flex-col sm:flex-row gap-4">
-                        <div className="flex-1 relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <div className="flex flex-col gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                <Input
+                                    placeholder="Client name"
+                                    value={clientName}
+                                    onChange={(e) => setClientName(e.target.value)}
+                                    className="pl-10 bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10"
+                                />
+                            </div>
                             <Input
-                                placeholder="Search orders, customers..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className="pl-10 bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10"
+                                placeholder="Email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10"
+                            />
+                            <Input
+                                placeholder="Phone number"
+                                value={phoneNumber}
+                                onChange={(e) => setPhoneNumber(e.target.value)}
+                                className="bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10"
                             />
                         </div>
+                        <div className="flex flex-col sm:flex-row gap-4">
                         <select
                             value={statusFilter}
                             onChange={(e) => {
@@ -190,6 +207,7 @@ export default function AdminOrdersPage() {
                                 Clear
                             </Button>
                         )}
+                        </div>
                     </div>
                 </div>
 

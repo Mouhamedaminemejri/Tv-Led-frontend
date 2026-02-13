@@ -159,7 +159,7 @@ function VerifyingView() {
 // Verify Email Page Component
 // ============================================================================
 
-export default function VerifyEmailPage() {
+function VerifyEmailInner() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const token = searchParams.get("token");
@@ -228,5 +228,22 @@ export default function VerifyEmailPage() {
         >
             {getView()}
         </AuthLayout>
+    );
+}
+
+export default function VerifyEmailPage() {
+    return (
+        <React.Suspense
+            fallback={
+                <AuthLayout title="Verifying your email..." subtitle="" showBackLink={false}>
+                    <div className="text-center py-12">
+                        <Loader2 className="h-10 w-10 animate-spin text-blue-600 dark:text-blue-400 mx-auto mb-6" />
+                        <p className="text-gray-600 dark:text-gray-400">Please wait...</p>
+                    </div>
+                </AuthLayout>
+            }
+        >
+            <VerifyEmailInner />
+        </React.Suspense>
     );
 }

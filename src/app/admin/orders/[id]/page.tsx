@@ -22,7 +22,7 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { useParams } from "next/navigation";
-import { AdminService, type AdminOrder, type OrderStatus } from "@/services/admin-service";
+import { AdminService, type AdminOrder, type OrderStatus, type PickupMethod } from "@/services/admin-service";
 import { cn } from "@/lib/utils";
 import {
     Dialog,
@@ -34,28 +34,24 @@ import {
 } from "@/components/ui/dialog";
 
 const ORDER_STATUSES: { value: OrderStatus; label: string; description: string }[] = [
-    { value: "PENDING", label: "Pending", description: "Order received, awaiting confirmation" },
-    { value: "CONFIRMED", label: "Confirmed", description: "Order confirmed, preparing for processing" },
-    { value: "PROCESSING", label: "Processing", description: "Order is being prepared" },
-    { value: "SHIPPED", label: "Shipped", description: "Order has been shipped" },
-    { value: "DELIVERED", label: "Delivered", description: "Order has been delivered" },
-    { value: "CANCELLED", label: "Cancelled", description: "Order has been cancelled" },
+    { value: "PENDING", label: "Pending", description: "New order created (default)" },
+    { value: "PICKUP", label: "Pickup", description: "Order is ready for pickup (customer/courier)" },
+    { value: "DELIVERED", label: "Delivered", description: "Delivery done (final)" },
+];
+
+const PICKUP_METHODS: { value: PickupMethod; label: string }[] = [
+    { value: "CUSTOMER_PICKUP", label: "Customer Pickup" },
+    { value: "COURIER_PICKUP", label: "Courier Pickup" },
 ];
 
 const getStatusConfig = (status: OrderStatus) => {
     switch (status) {
         case "PENDING":
             return { icon: Clock, color: "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400", ring: "ring-yellow-500" };
-        case "CONFIRMED":
-            return { icon: CheckCircle, color: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400", ring: "ring-blue-500" };
-        case "PROCESSING":
-            return { icon: Package, color: "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400", ring: "ring-purple-500" };
-        case "SHIPPED":
-            return { icon: Truck, color: "bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400", ring: "ring-indigo-500" };
+        case "PICKUP":
+            return { icon: Package, color: "bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400", ring: "ring-orange-500" };
         case "DELIVERED":
             return { icon: CheckCircle, color: "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400", ring: "ring-green-500" };
-        case "CANCELLED":
-            return { icon: XCircle, color: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400", ring: "ring-red-500" };
         default:
             return { icon: Clock, color: "bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-400", ring: "ring-gray-500" };
     }
@@ -70,6 +66,7 @@ export default function OrderDetailPage() {
     const [error, setError] = React.useState<string | null>(null);
     const [statusDialogOpen, setStatusDialogOpen] = React.useState(false);
     const [newStatus, setNewStatus] = React.useState<OrderStatus | null>(null);
+    const [pickupMethod, setPickupMethod] = React.useState<PickupMethod | "">("");
     const [updating, setUpdating] = React.useState(false);
 
     // Load order
@@ -97,10 +94,19 @@ export default function OrderDetailPage() {
 
         try {
             setUpdating(true);
-            const updated = await AdminService.updateOrderStatus(orderId, newStatus);
+            if (newStatus === "PICKUP" && !pickupMethod) {
+                setError("Pickup method is required when status is PICKUP.");
+                return;
+            }
+
+            const updated = await AdminService.updateOrderStatus(orderId, {
+                status: newStatus,
+                pickupMethod: newStatus === "PICKUP" ? pickupMethod : null,
+            });
             setOrder(updated);
             setStatusDialogOpen(false);
             setNewStatus(null);
+            setPickupMethod("");
         } catch (err) {
             console.error("Error updating status:", err);
             setError(err instanceof Error ? err.message : "Failed to update status");
@@ -413,7 +419,11 @@ export default function OrderDetailPage() {
                             return (
                                 <button
                                     key={status.value}
-                                    onClick={() => setNewStatus(status.value)}
+                                    onClick={() => {
+                                        setNewStatus(status.value);
+                                        if (status.value !== "PICKUP") setPickupMethod("");
+                                        setError(null);
+                                    }}
                                     disabled={isCurrent}
                                     className={cn(
                                         "w-full flex items-center gap-3 p-3 rounded-lg border transition-all text-left",
@@ -440,12 +450,37 @@ export default function OrderDetailPage() {
                         })}
                     </div>
 
+                    {/* Pickup Method */}
+                    {newStatus === "PICKUP" && (
+                        <div className="space-y-2 pb-2">
+                            <div className="text-sm font-medium text-gray-900 dark:text-white">
+                                Pickup method <span className="text-red-600 dark:text-red-400">*</span>
+                            </div>
+                            <select
+                                value={pickupMethod}
+                                onChange={(e) => {
+                                    setPickupMethod(e.target.value as PickupMethod);
+                                    setError(null);
+                                }}
+                                className="w-full px-4 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-white/10 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 [&>option]:bg-white [&>option]:dark:bg-gray-900 [&>option]:text-gray-900 [&>option]:dark:text-white"
+                            >
+                                <option value="">Select pickup method...</option>
+                                {PICKUP_METHODS.map((m) => (
+                                    <option key={m.value} value={m.value}>
+                                        {m.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
                     <DialogFooter>
                         <Button
                             variant="outline"
                             onClick={() => {
                                 setStatusDialogOpen(false);
                                 setNewStatus(null);
+                                setPickupMethod("");
                             }}
                             className="border-gray-200 dark:border-white/10"
                         >
@@ -453,7 +488,7 @@ export default function OrderDetailPage() {
                         </Button>
                         <Button
                             onClick={handleUpdateStatus}
-                            disabled={!newStatus || updating}
+                            disabled={!newStatus || updating || (newStatus === "PICKUP" && !pickupMethod)}
                             className="bg-blue-600 hover:bg-blue-500 text-white"
                         >
                             {updating ? (

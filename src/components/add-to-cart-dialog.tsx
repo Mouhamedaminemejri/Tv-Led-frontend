@@ -30,6 +30,9 @@ export function AddToCartDialog({ product, children }: AddToCartDialogProps) {
     const existingProduct = cart.find(item => item.id === product.id);
     const existingQuantity = existingProduct ? existingProduct.quantity : 0;
     const remainingStock = Math.max(0, product.stock - existingQuantity);
+    const unitPrice = Number(product.price) || 0;
+    const totalPrice = unitPrice * quantity;
+    const diagonal = product.tvSizeInch ?? product.size;
     
     // Zoom functionality handlers
     const handleMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -91,10 +94,10 @@ export function AddToCartDialog({ product, children }: AddToCartDialogProps) {
             <DialogTrigger asChild>
                 {children}
             </DialogTrigger>
-            <DialogContent className="sm:max-w-md bg-white dark:bg-zinc-950 border-gray-200 dark:border-white/10 text-gray-900 dark:text-white p-0 overflow-hidden gap-0">
+            <DialogContent className="sm:max-w-md min-h-[70vh] max-h-[90vh] bg-white dark:bg-zinc-950 border-gray-200 dark:border-white/10 text-gray-900 dark:text-white p-0 overflow-hidden gap-0 flex flex-col">
                 <div 
                     ref={imageContainerRef}
-                    className="relative h-48 w-full bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-900 dark:to-black overflow-hidden"
+                    className="relative h-48 w-full bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-900 dark:to-black overflow-hidden shrink-0"
                     style={{ cursor: isZooming ? 'crosshair' : 'zoom-in' }}
                     onMouseMove={handleMouseMove}
                     onMouseEnter={handleMouseEnter}
@@ -135,9 +138,8 @@ export function AddToCartDialog({ product, children }: AddToCartDialogProps) {
                     )}
                 </div>
 
-                <div className="p-6">
+                <div className="p-6 flex-1 overflow-y-auto">
                     <DialogHeader>
-                        <div className="text-xs text-gray-600 dark:text-gray-400 font-bold mb-1 uppercase tracking-wider">{product.brand} • {product.reference}</div>
                         <DialogTitle className="text-xl text-gray-900 dark:text-white">{product.title}</DialogTitle>
                         <DialogDescription className="text-gray-600 dark:text-gray-400 mt-2">
                             Professional grade LED backlight replacement. Verified for quality and longevity.
@@ -147,7 +149,7 @@ export function AddToCartDialog({ product, children }: AddToCartDialogProps) {
                     <div className="py-6">
                         <div className="flex items-center justify-between mb-2">
                             <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Price per unit</span>
-                            <span className="text-lg font-bold text-gray-900 dark:text-white">{product.price.toFixed(2)} TND</span>
+                            <span className="text-lg font-bold text-gray-900 dark:text-white">{unitPrice.toFixed(2)} TND</span>
                         </div>
 
                         <div className="flex items-center justify-between bg-gray-50 dark:bg-white/5 p-3 rounded-lg border border-gray-200 dark:border-white/10 mt-4">
@@ -177,13 +179,63 @@ export function AddToCartDialog({ product, children }: AddToCartDialogProps) {
                         <div className="flex justify-end mt-2 text-xs text-gray-600 dark:text-gray-500">
                             Max available: {product.stock}
                         </div>
+
+                        <div className="mt-5 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-4 sm:p-5">
+                            <div className="text-base font-semibold text-gray-900 dark:text-white mb-3">
+                                Additional information
+                            </div>
+                            <div className="divide-y divide-gray-200 dark:divide-white/10 text-sm">
+                                <div className="flex items-center justify-between gap-3 py-2">
+                                    <span className="text-gray-600 dark:text-gray-400">Categories</span>
+                                    <span className="text-right font-medium text-gray-900 dark:text-white break-words">
+                                        {product.brand || "—"} / LED backlight
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 py-2">
+                                    <span className="text-gray-600 dark:text-gray-400">Diagonal</span>
+                                    <span className="text-right font-medium text-gray-900 dark:text-white">
+                                        {diagonal != null ? `${diagonal}″` : "—"}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 py-2">
+                                    <span className="text-gray-600 dark:text-gray-400">Packaging length</span>
+                                    <span className="text-right font-medium text-gray-900 dark:text-white break-words">
+                                        {product.length || "—"}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 py-2">
+                                    <span className="text-gray-600 dark:text-gray-400">TV backlight</span>
+                                    <span className="text-right font-medium text-gray-900 dark:text-white break-words">
+                                        {product.tvBacklightType || "—"}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 py-2">
+                                    <span className="text-gray-600 dark:text-gray-400">LED count</span>
+                                    <span className="text-right font-medium text-gray-900 dark:text-white">
+                                        {product.ledCount || "—"}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 py-2">
+                                    <span className="text-gray-600 dark:text-gray-400">Strip count</span>
+                                    <span className="text-right font-medium text-gray-900 dark:text-white">
+                                        {product.stripCount || "—"}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 py-2">
+                                    <span className="text-gray-600 dark:text-gray-400">Voltage</span>
+                                    <span className="text-right font-medium text-gray-900 dark:text-white">
+                                        {product.voltage != null ? `${product.voltage}V` : "—"}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <DialogFooter className="flex-col sm:justify-between gap-4 border-t border-gray-200 dark:border-white/10 pt-4">
                         <div className="flex items-center justify-between w-full mb-4 sm:mb-0">
                             <div className="flex flex-col">
                                 <span className="text-xs text-gray-600 dark:text-gray-400">Total Price</span>
-                                <span className="text-2xl font-bold text-gray-900 dark:text-white">{(product.price * quantity).toFixed(2)} <span className="text-sm text-gray-600 dark:text-gray-500">TND</span></span>
+                                <span className="text-2xl font-bold text-gray-900 dark:text-white">{totalPrice.toFixed(2)} <span className="text-sm text-gray-600 dark:text-gray-500">TND</span></span>
                             </div>
                         </div>
                         <Button className="w-full bg-gray-900 dark:bg-blue-600 hover:bg-gray-800 dark:hover:bg-blue-500 text-white font-bold h-12 rounded-xl" onClick={handleAddToCart}>

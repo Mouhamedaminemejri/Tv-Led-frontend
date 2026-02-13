@@ -91,7 +91,7 @@ function InvalidToken() {
 // Reset Password Page Component
 // ============================================================================
 
-export default function ResetPasswordPage() {
+function ResetPasswordInner() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const token = searchParams.get("token");
@@ -280,5 +280,22 @@ export default function ResetPasswordPage() {
                 </AuthLink>
             </p>
         </AuthLayout>
+    );
+}
+
+export default function ResetPasswordPage() {
+    return (
+        <React.Suspense
+            fallback={
+                <AuthLayout title="Reset your password" subtitle="Choose a new password for your account." showBackLink>
+                    <div className="text-center py-12">
+                        <Loader2 className="h-10 w-10 animate-spin text-blue-600 dark:text-blue-400 mx-auto mb-6" />
+                        <p className="text-gray-600 dark:text-gray-400">Loading...</p>
+                    </div>
+                </AuthLayout>
+            }
+        >
+            <ResetPasswordInner />
+        </React.Suspense>
     );
 }

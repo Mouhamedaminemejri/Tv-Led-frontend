@@ -37,7 +37,7 @@ interface FormErrors {
 // Login Page Component
 // ============================================================================
 
-export default function LoginPage() {
+function LoginInner() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { login, loginWithGoogle, loginWithFacebook, isLoading, error, clearError } = useAuth();
@@ -233,5 +233,22 @@ export default function LoginPage() {
                 </AuthLink>
             </p>
         </AuthLayout>
+    );
+}
+
+export default function LoginPage() {
+    return (
+        <React.Suspense
+            fallback={
+                <AuthLayout title="Welcome back" subtitle="Sign in to continue." showBackLink>
+                    <div className="text-center py-12">
+                        <Loader2 className="h-10 w-10 animate-spin text-blue-600 dark:text-blue-400 mx-auto mb-6" />
+                        <p className="text-gray-600 dark:text-gray-400">Loading...</p>
+                    </div>
+                </AuthLayout>
+            }
+        >
+            <LoginInner />
+        </React.Suspense>
     );
 }

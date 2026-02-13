@@ -75,6 +75,47 @@
   }
 }
 
+/* Hover border draw animation (from corners) */
+@layer utilities {
+  .hover-draw-border {
+    position: relative;
+  }
+
+  .hover-draw-border::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    /* 4 lines: top, right, bottom, left */
+    background:
+      linear-gradient(currentColor, currentColor) left top / 0 2px no-repeat,
+      linear-gradient(currentColor, currentColor) right top / 2px 0 no-repeat,
+      linear-gradient(currentColor, currentColor) right bottom / 0 2px no-repeat,
+      linear-gradient(currentColor, currentColor) left bottom / 2px 0 no-repeat;
+    opacity: 0;
+    transition: opacity 150ms ease, background-size 450ms ease;
+  }
+
+  .hover-draw-border:hover::after {
+    opacity: 1;
+    background-size:
+      100% 2px,
+      2px 100%,
+      100% 2px,
+      2px 100%;
+  }
+
+  /* Choose border color via text color */
+  .hover-draw-border.hover-draw-border-gray {
+    color: rgb(156 163 175); /* gray-400 */
+  }
+
+  .dark .hover-draw-border.hover-draw-border-gray {
+    color: rgba(255, 255, 255, 0.25);
+  }
+}
+
 /* Custom Apple-style thin scrollbar - theme aware */
 @layer utilities {
   /* Webkit browsers (Chrome, Safari, Edge) - Light mode */

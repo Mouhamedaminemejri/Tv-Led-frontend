@@ -1,11 +1,7 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { UserMenu } from "@/components/user-menu";
-import { Wrench, Component, Tv, Zap, MonitorPlay, ArrowRight, Facebook, Instagram, Twitter, Sun, Moon, Monitor } from "lucide-react";
+import { Wrench, Component, Tv, Zap, MonitorPlay, ArrowRight, Facebook, Instagram, Twitter } from "lucide-react";
 import Link from "next/link";
-import { useTheme } from "@/context/theme-context";
-import * as React from "react";
 // Using the generated image placeholder path - user will need to move this or I will handle the file location.
 // For now, I'll refer to it via a local asset path assuming it will be served from public.
 // Wait, I should not use the artifact path directly in the src attribute for next/image if it's not in public.
@@ -17,30 +13,6 @@ import * as React from "react";
 // I'll add a step to move the file. For this file content, I'll assume it's at /hero-bg.png
 
 export default function Home() {
-  const { theme, setTheme } = useTheme();
-
-  const cycleTheme = () => {
-    if (theme === "system") {
-      setTheme("light");
-    } else if (theme === "light") {
-      setTheme("dark");
-    } else {
-      setTheme("system");
-    }
-  };
-
-  const getThemeIcon = () => {
-    if (theme === "light") return <Sun className="h-4 w-4" />;
-    if (theme === "dark") return <Moon className="h-4 w-4" />;
-    return <Monitor className="h-4 w-4" />;
-  };
-
-  const getThemeLabel = () => {
-    if (theme === "light") return "Light";
-    if (theme === "dark") return "Dark";
-    return "System";
-  };
-
   const services = [
     {
       title: "LED Lighting Solutions",
@@ -86,41 +58,8 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-white dark:bg-black text-black dark:text-white selection:bg-primary selection:text-primary-foreground">
-      {/* Navbar - Kept consistent but darkened */}
-      <header className="fixed top-0 w-full border-b border-gray-200 dark:border-white/10 bg-white/80 dark:bg-black/50 backdrop-blur-xl z-50">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 font-bold text-xl">
-            <div className="h-8 w-8 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Tv className="h-5 w-5 text-white" />
-            </div>
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-400">TunisiaTVRepair</span>
-          </div>
-          <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-gray-600 dark:text-gray-400">
-            <Link href="#" className="hover:text-gray-900 dark:hover:text-white transition-colors">Home</Link>
-            <Link href="#" className="hover:text-gray-900 dark:hover:text-white transition-colors">Store</Link>
-            <Link href="#" className="hover:text-gray-900 dark:hover:text-white transition-colors">Forum</Link>
-            <Link href="#" className="hover:text-gray-900 dark:hover:text-white transition-colors">Contact</Link>
-          </nav>
-          <div className="flex items-center gap-3">
-            {/* Theme Toggle Button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={cycleTheme}
-              className="h-8 px-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
-              title={`Theme: ${getThemeLabel()}`}
-            >
-              {getThemeIcon()}
-            </Button>
-            
-            {/* User Menu */}
-            <UserMenu />
-          </div>
-        </div>
-      </header>
-
       {/* Hero Section */}
-      <section className="relative pt-32 pb-20 lg:pt-48 lg:pb-32 overflow-hidden">
+      <section className="relative pt-20 pb-20 lg:pt-32 lg:pb-32 overflow-hidden">
         {/* Background Image Layer */}
         <div className="absolute inset-0 z-0">
           {/* We will insert the generated image here in CSS or via Image component if available */}

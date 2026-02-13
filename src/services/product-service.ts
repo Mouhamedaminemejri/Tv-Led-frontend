@@ -1,3 +1,18 @@
+export interface ProductDeliveryMethod {
+    name?: string | null;
+    detail?: string | null;
+    price?: string | number | null;
+}
+
+export interface ProductDisplayConfig {
+    Hide?: boolean | null;
+    hide?: boolean | null;
+    discount?: number | null;
+    discountedPrice?: number | null;
+    estimatedDeliveryGapHours?: number | null;
+    deliveryMethods?: Array<string | ProductDeliveryMethod> | null;
+}
+
 // Define the Product Interface shared across the app
 export interface LedProduct {
     id: string;
@@ -5,11 +20,42 @@ export interface LedProduct {
     brand: string;
     reference: string;
     size: number | null;
+    tvSizeInch?: number | null;
     price: number;
+    salePrice?: number | null;
+    purchasePrice?: number | null;
     stock: number;
     rating: number;
-    images: string[]; // Changed from 'image' to 'images' array
+    images?: string[]; // Changed from 'image' to 'images' array
     tags: string[];
+
+    // Extra fields (optional) — available in DB/backend
+    number?: string | null; // e.g. stock number / SKU
+    suk?: string | null; // SKU (field name in DB)
+    tvFullName?: string | null;
+    summary?: string | null;
+    description?: string | null;
+    supplier?: string | null;
+    models?: string | null; // compatible TV models (often long text)
+
+    // Technical fields seen in DB screenshot
+    ledCount?: string | null;
+    length?: string | null;
+    stripCount?: string | null;
+    voltage?: number | null;
+    tvBacklightType?: string | null;
+    tvPanelType?: string | null;
+
+    // Optional commerce / UX fields (if backend provides them later)
+    warrantyMonths?: number | null;
+    reviewCount?: number | null;
+    expectedDeliveryDate?: string | null; // ISO date string
+    quantityDiscounts?: Array<{
+        minQty: number;
+        maxQty?: number | null;
+        price: number;
+    }> | null;
+    config?: ProductDisplayConfig | string | null;
 }
 
 // Pagination response interface
@@ -35,7 +81,58 @@ export interface FilterDataProduct {
     tags: string[];
 }
 
+export interface SearchSuggestionProduct {
+    id: string;
+    title: string;
+    reference: string;
+    brand: string;
+    price: number | string;
+    salePrice?: number | string | null;
+    stock: number | string;
+    tvSizeInch?: number | string | null;
+    image?: string | null;
+    matchedBy?: string[] | null;
+}
+
+export interface SearchSuggestionsResponse {
+    brands: string[];
+    references: string[];
+    titles: string[];
+    models: string[];
+    tvPanelTypes: string[];
+    suks: string[];
+    products?: SearchSuggestionProduct[];
+}
+
 const API_BASE_URL = "http://localhost:3001/api";
+
+const toFiniteNumberOr = (value: unknown, fallback: number): number => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+function normalizeProduct(product: LedProduct): LedProduct {
+    return {
+        ...product,
+        size: product.size == null ? null : toFiniteNumberOr(product.size, 0),
+        tvSizeInch: product.tvSizeInch == null ? null : toFiniteNumberOr(product.tvSizeInch, 0),
+        price: toFiniteNumberOr(product.price, 0),
+        salePrice: product.salePrice == null ? null : toFiniteNumberOr(product.salePrice, 0),
+        purchasePrice: product.purchasePrice == null ? null : toFiniteNumberOr(product.purchasePrice, 0),
+        stock: toFiniteNumberOr(product.stock, 0),
+        rating: toFiniteNumberOr(product.rating, 0),
+        reviewCount: product.reviewCount == null ? null : toFiniteNumberOr(product.reviewCount, 0),
+        warrantyMonths: product.warrantyMonths == null ? null : toFiniteNumberOr(product.warrantyMonths, 0),
+        voltage: product.voltage == null ? null : toFiniteNumberOr(product.voltage, 0),
+        quantityDiscounts: Array.isArray(product.quantityDiscounts)
+            ? product.quantityDiscounts.map((tier) => ({
+                minQty: toFiniteNumberOr(tier.minQty, 0),
+                maxQty: tier.maxQty == null ? null : toFiniteNumberOr(tier.maxQty, 0),
+                price: toFiniteNumberOr(tier.price, 0),
+            }))
+            : product.quantityDiscounts ?? null,
+    };
+}
 
 export class ProductService {
     static async getAllProducts(): Promise<LedProduct[]> {
@@ -52,15 +149,15 @@ export class ProductService {
             // Handle both array and paginated response formats
             if (Array.isArray(data)) {
                 // Legacy format: direct array
-                return data as LedProduct[];
+                return (data as LedProduct[]).map(normalizeProduct);
             } else if (data && typeof data === 'object') {
                 // Paginated format: check for both 'data' and 'products' properties
                 if (Array.isArray(data.data)) {
                     // Format: { data: [...], pagination: {...} }
-                    return data.data as LedProduct[];
+                    return (data.data as LedProduct[]).map(normalizeProduct);
                 } else if (Array.isArray(data.products)) {
                     // Format: { products: [...], pagination: {...} }
-                    return data.products as LedProduct[];
+                    return (data.products as LedProduct[]).map(normalizeProduct);
                 }
             }
             
@@ -82,7 +179,7 @@ export class ProductService {
 
                 if (response.ok) {
                     const data = await response.json();
-                    return data as LedProduct;
+                    return normalizeProduct(data as LedProduct);
                 }
             } catch (fetchError) {
                 // If fetch fails, continue to fallback
@@ -99,7 +196,7 @@ export class ProductService {
                 throw new Error(`Product with id ${id} not found`);
             }
 
-            return product;
+            return normalizeProduct(product);
         } catch (error) {
             console.error(`ProductService.getProductById(${id}) error:`, error);
             throw error;
@@ -156,11 +253,14 @@ export class ProductService {
             if (data && typeof data === 'object') {
                 if (Array.isArray(data.data)) {
                     return {
-                        products: data.data as LedProduct[],
+                        products: (data.data as LedProduct[]).map(normalizeProduct),
                         pagination: data.pagination
                     } as PaginatedProductsResponse;
                 } else if (Array.isArray(data.products)) {
-                    return data as PaginatedProductsResponse;
+                    return {
+                        ...data,
+                        products: (data.products as LedProduct[]).map(normalizeProduct),
+                    } as PaginatedProductsResponse;
                 }
             }
             
@@ -189,11 +289,7 @@ export class ProductService {
     }
 
     // Get autocomplete suggestions for search
-    static async getSearchSuggestions(query: string, limit: number = 10): Promise<{
-        brands: string[];
-        references: string[];
-        titles: string[];
-    }> {
+    static async getSearchSuggestions(query: string, limit: number = 10): Promise<SearchSuggestionsResponse> {
         try {
             const response = await fetch(`${API_BASE_URL}/products/search-suggestions?q=${encodeURIComponent(query)}&limit=${limit}`);
 
@@ -205,15 +301,30 @@ export class ProductService {
                 } else {
                     console.warn(`Failed to fetch search suggestions: ${response.status} ${response.statusText}`);
                 }
-                return { brands: [], references: [], titles: [] };
+                return { brands: [], references: [], titles: [], models: [], tvPanelTypes: [], suks: [], products: [] };
             }
 
             const data = await response.json();
-            return data as { brands: string[]; references: string[]; titles: string[] };
+            const responseData = data as SearchSuggestionsResponse;
+            return {
+                brands: Array.isArray(responseData.brands) ? responseData.brands : [],
+                references: Array.isArray(responseData.references) ? responseData.references : [],
+                titles: Array.isArray(responseData.titles) ? responseData.titles : [],
+                models: Array.isArray(responseData.models) ? responseData.models : [],
+                tvPanelTypes: Array.isArray(responseData.tvPanelTypes) ? responseData.tvPanelTypes : [],
+                suks: Array.isArray(responseData.suks) ? responseData.suks : [],
+                products: Array.isArray(responseData.products) ? responseData.products.map((p) => ({
+                    ...p,
+                    price: toFiniteNumberOr(p.price, 0),
+                    salePrice: p.salePrice == null ? null : toFiniteNumberOr(p.salePrice, 0),
+                    stock: toFiniteNumberOr(p.stock, 0),
+                    tvSizeInch: p.tvSizeInch == null ? null : toFiniteNumberOr(p.tvSizeInch, 0),
+                })) : [],
+            };
         } catch (error) {
             // Network errors or other issues - return empty suggestions silently
             console.warn("ProductService.getSearchSuggestions error:", error);
-            return { brands: [], references: [], titles: [] };
+            return { brands: [], references: [], titles: [], models: [], tvPanelTypes: [], suks: [], products: [] };
         }
     }
 
@@ -288,17 +399,22 @@ export class ProductService {
         reference: string;
         brand: string;
         title: string;
-        summary?: string | null;
         purchasePrice?: number | null;
         supplier?: string | null;
         salePrice: number;
         price: number;
-        description?: string | null;
-        size?: number | null;
+        tvBacklightType?: string | null;
+        tvPanelType?: string | null;
+        tvSizeInch?: number | null;
+        stripCount?: string | null;
+        ledCount?: string | null;
+        voltage?: number | null;
+        length?: string | null;
         stock: number;
         rating?: number;
         images?: string[];
         tags?: string[];
+        config?: string | null;
     }): Promise<LedProduct> {
         try {
             const response = await fetch(`${API_BASE_URL}/products`, {
@@ -315,7 +431,7 @@ export class ProductService {
             }
 
             const data = await response.json();
-            return data as LedProduct;
+            return normalizeProduct(data as LedProduct);
         } catch (error) {
             console.error("ProductService.createProduct error:", error);
             throw error;
@@ -328,17 +444,22 @@ export class ProductService {
         reference?: string;
         brand?: string;
         title?: string;
-        summary?: string | null;
         purchasePrice?: number | null;
         supplier?: string | null;
         salePrice?: number;
         price?: number;
-        description?: string | null;
-        size?: number | null;
+        tvBacklightType?: string | null;
+        tvPanelType?: string | null;
+        tvSizeInch?: number | null;
+        stripCount?: string | null;
+        ledCount?: string | null;
+        voltage?: number | null;
+        length?: string | null;
         stock?: number;
         rating?: number;
         images?: string[];
         tags?: string[];
+        config?: string | null;
     }): Promise<LedProduct> {
         try {
             const response = await fetch(`${API_BASE_URL}/products/${id}`, {
@@ -355,7 +476,7 @@ export class ProductService {
             }
 
             const data = await response.json();
-            return data as LedProduct;
+            return normalizeProduct(data as LedProduct);
         } catch (error) {
             console.error("ProductService.updateProduct error:", error);
             throw error;

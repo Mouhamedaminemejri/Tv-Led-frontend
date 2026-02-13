@@ -7,11 +7,16 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CreditCard, Truck, Smartphone, AlertCircle, Loader2, CheckCircle2, Lock, ArrowLeft, Home } from "lucide-react";
+import { CreditCard, Truck, Smartphone, AlertCircle, Loader2, CheckCircle2, Lock, ArrowLeft, ArrowRight, Home, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import { useCart } from "@/context/cart-context";
 import { ProductService, type LedProduct } from "@/services/product-service";
 import { getUserId } from "@/utils/user-id";
+import { TokenManager } from "@/services/auth-service";
+import AuthService from "@/services/auth-service";
+import { GuestSession } from "@/utils/guest-session";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
 
 // Tunisia cities/governorates
 const TUNISIA_CITIES = [
@@ -20,9 +25,8 @@ const TUNISIA_CITIES = [
     "Mahdia", "Sfax", "Gafsa", "Tozeur", "Kebili", "Gabès", "Medenine", "Tataouine"
 ];
 
-// Payment method types
-type PaymentMethod = "card" | "paykassma" | "cash_on_delivery" | "mobile";
-type CardGateway = "monetique" | "redpay" | "orange" | "paykassma_card" | "other";
+// Payment method types — all redirect-based, no raw card data on our site
+type PaymentMethod = "cash_on_delivery" | "mobile" | "card_gateway";
 
 interface CheckoutFormData {
     // Personal Information
@@ -45,11 +49,6 @@ interface CheckoutFormData {
     
     // Payment Information
     paymentMethod: PaymentMethod;
-    cardGateway: CardGateway;
-    cardNumber: string;
-    cardExpiry: string; // MM/YY
-    cardCvv: string;
-    cardholderName: string;
 }
 
 interface CheckoutItem {
@@ -62,6 +61,23 @@ interface CheckoutItem {
 }
 
 export default function CheckoutPage() {
+    return (
+        <React.Suspense
+            fallback={
+                <main className="min-h-screen bg-gray-50 dark:bg-black text-gray-900 dark:text-white flex items-center justify-center">
+                    <div className="text-center">
+                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-500" />
+                        <p className="text-gray-600 dark:text-gray-400">Loading checkout...</p>
+                    </div>
+                </main>
+            }
+        >
+            <CheckoutInner />
+        </React.Suspense>
+    );
+}
+
+function CheckoutInner() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { cart, clearCart, addToCart } = useCart();
@@ -87,11 +103,6 @@ export default function CheckoutPage() {
         shippingCity: "",
         shippingPostalCode: "",
         paymentMethod: "cash_on_delivery",
-        cardGateway: "monetique",
-        cardNumber: "",
-        cardExpiry: "",
-        cardCvv: "",
-        cardholderName: "",
     });
 
     const [errors, setErrors] = React.useState<Partial<Record<keyof CheckoutFormData, string>>>({});
@@ -100,6 +111,37 @@ export default function CheckoutPage() {
     
     // Track if we've already added product to cart to prevent infinite loop
     const productAddedToCartRef = React.useRef<string | null>(null);
+
+    // Auto-fill form from logged-in user data
+    React.useEffect(() => {
+        const prefill = async () => {
+            try {
+                // First try stored user (instant, no API call)
+                let user = TokenManager.getStoredUser();
+
+                // If logged in but no stored user, fetch from API
+                if (!user && AuthService.isAuthenticated()) {
+                    try {
+                        user = await AuthService.getCurrentUser();
+                    } catch {
+                        // Not logged in or token expired — skip
+                    }
+                }
+
+                if (user) {
+                    setFormData(prev => ({
+                        ...prev,
+                        fullName: prev.fullName || [user!.firstName, user!.lastName].filter(Boolean).join(" "),
+                        email: prev.email || user!.email || "",
+                        phone: prev.phone || (user!.phone ? user!.phone.replace(/\s/g, "") : ""),
+                    }));
+                }
+            } catch {
+                // Silently fail — user can fill manually
+            }
+        };
+        prefill();
+    }, []);
 
     // Load checkout items based on source
     React.useEffect(() => {
@@ -191,42 +233,6 @@ export default function CheckoutPage() {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     };
 
-    const validateCardNumber = (cardNumber: string): boolean => {
-        const cleaned = cardNumber.replace(/\s/g, "");
-        if (!/^\d{13,19}$/.test(cleaned)) return false;
-        
-        let sum = 0;
-        let shouldDouble = false;
-        for (let i = cleaned.length - 1; i >= 0; i--) {
-            let digit = parseInt(cleaned.charAt(i), 10);
-            if (shouldDouble) {
-                digit *= 2;
-                if (digit > 9) digit -= 9;
-            }
-            sum += digit;
-            shouldDouble = !shouldDouble;
-        }
-        return sum % 10 === 0;
-    };
-
-    const validateCardExpiry = (expiry: string): boolean => {
-        const match = expiry.match(/^(\d{2})\/(\d{2})$/);
-        if (!match) return false;
-        const month = parseInt(match[1], 10);
-        const year = parseInt(match[2], 10);
-        const currentYear = new Date().getFullYear() % 100;
-        const currentMonth = new Date().getMonth() + 1;
-        
-        if (month < 1 || month > 12) return false;
-        if (year < currentYear) return false;
-        if (year === currentYear && month < currentMonth) return false;
-        return true;
-    };
-
-    const validateCVV = (cvv: string): boolean => {
-        return /^\d{3,4}$/.test(cvv);
-    };
-
     const validatePostalCode = (code: string): boolean => {
         return /^\d{4}$/.test(code);
     };
@@ -259,9 +265,7 @@ export default function CheckoutPage() {
                 newErrors.phone = "Phone must be 8 digits (can start with 2, 5, or 9)";
             }
 
-            if (!formData.dateOfBirth) {
-                newErrors.dateOfBirth = "Date of birth is required";
-            } else {
+            if (formData.dateOfBirth) {
                 const birthDate = new Date(formData.dateOfBirth);
                 const today = new Date();
                 const age = today.getFullYear() - birthDate.getFullYear();
@@ -300,29 +304,7 @@ export default function CheckoutPage() {
         }
 
         if (step === "payment") {
-            if (formData.paymentMethod === "card" && formData.cardGateway === "other") {
-                if (!formData.cardNumber) {
-                    newErrors.cardNumber = "Card number is required";
-                } else if (!validateCardNumber(formData.cardNumber)) {
-                    newErrors.cardNumber = "Invalid card number";
-                }
-
-                if (!formData.cardExpiry) {
-                    newErrors.cardExpiry = "Expiry date is required";
-                } else if (!validateCardExpiry(formData.cardExpiry)) {
-                    newErrors.cardExpiry = "Invalid expiry date (MM/YY)";
-                }
-
-                if (!formData.cardCvv) {
-                    newErrors.cardCvv = "CVV is required";
-                } else if (!validateCVV(formData.cardCvv)) {
-                    newErrors.cardCvv = "CVV must be 3 or 4 digits";
-                }
-
-                if (!formData.cardholderName.trim()) {
-                    newErrors.cardholderName = "Cardholder name is required";
-                }
-            }
+            // All payment methods are redirect-based or COD — no client-side card validation needed
         }
 
         setErrors(newErrors);
@@ -340,32 +322,11 @@ export default function CheckoutPage() {
         }
     };
 
-    const formatCardNumber = (value: string): string => {
-        const cleaned = value.replace(/\s/g, "");
-        const groups = cleaned.match(/.{1,4}/g);
-        return groups ? groups.join(" ") : cleaned;
-    };
-
     const formatPhone = (value: string): string => {
         const cleaned = value.replace(/\s/g, "");
         if (cleaned.length <= 2) return cleaned;
         if (cleaned.length <= 4) return `${cleaned.slice(0, 2)} ${cleaned.slice(2)}`;
         return `${cleaned.slice(0, 2)} ${cleaned.slice(2, 4)} ${cleaned.slice(4, 6)} ${cleaned.slice(6, 8)}`;
-    };
-
-    const handleCardNumberChange = (value: string) => {
-        const formatted = formatCardNumber(value);
-        handleInputChange("cardNumber", formatted);
-    };
-
-    const handleCardExpiryChange = (value: string) => {
-        const cleaned = value.replace(/\D/g, "");
-        if (cleaned.length >= 2) {
-            const formatted = `${cleaned.slice(0, 2)}/${cleaned.slice(2, 4)}`;
-            handleInputChange("cardExpiry", formatted);
-        } else {
-            handleInputChange("cardExpiry", cleaned);
-        }
     };
 
     const handlePhoneChange = (value: string) => {
@@ -403,27 +364,20 @@ export default function CheckoutPage() {
         try {
             const userId = getUserId();
 
-            // Map payment method to backend enum
-            const mapPaymentMethod = (method: PaymentMethod, gateway?: CardGateway): string => {
-                if (method === "card") {
-                    if (gateway === "monetique") return "CREDIT_DEBIT_CARD"; // e-DINAR
-                    if (gateway === "redpay") return "CREDIT_DEBIT_CARD"; // RedPay
-                    if (gateway === "orange") return "CREDIT_DEBIT_CARD"; // Orange Money
-                    if (gateway === "paykassma_card") return "PAYKASSMA"; // Paykassma Card
-                    return "CREDIT_DEBIT_CARD"; // Other (direct card)
-                }
-                if (method === "paykassma") return "PAYKASSMA";
+            // Map payment method to backend enum — all online methods redirect to gateway
+            const mapPaymentMethod = (method: PaymentMethod): string => {
                 if (method === "mobile") return "MOBILE_PAYMENT";
+                if (method === "card_gateway") return "CREDIT_DEBIT_CARD";
                 return "CASH_ON_DELIVERY";
             };
 
             // Prepare order data according to CreateOrderDto
             const orderData = {
-                userId: userId,
-                paymentMethod: mapPaymentMethod(formData.paymentMethod, formData.cardGateway),
+               // userId: userId,
+                paymentMethod: mapPaymentMethod(formData.paymentMethod),
                 fullName: formData.fullName,
                 cin: formData.cin,
-                dateOfBirth: formData.dateOfBirth,
+                ...(formData.dateOfBirth ? { dateOfBirth: formData.dateOfBirth } : {}),
                 email: formData.email,
                 phoneNumber: formData.phone,
                 billingAddress: {
@@ -442,12 +396,22 @@ export default function CheckoutPage() {
                 },
             };
 
+            // Backend requires JWT or X-Guest-Token
+            const headers: Record<string, string> = {
+                "Content-Type": "application/json",
+            };
+            const jwt = TokenManager.getAccessToken();
+            if (jwt && !TokenManager.isTokenExpired(jwt)) {
+                headers["Authorization"] = `Bearer ${jwt}`;
+            } else {
+                const guestToken = await GuestSession.ensureToken();
+                headers["X-Guest-Token"] = guestToken;
+            }
+
             // Call the payment initiation API
-            const response = await fetch("http://localhost:3001/api/checkout/initiate-payment", {
+            const response = await fetch(`${API_BASE_URL}/checkout/initiate-payment`, {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
+                headers,
                 body: JSON.stringify(orderData),
             });
 
@@ -459,31 +423,44 @@ export default function CheckoutPage() {
             const result = await response.json();
             const { order, paymentUrl, message } = result;
 
-            // If payment URL is provided, redirect to payment gateway
+            // If payment URL is provided (Konnect / gateway redirect)
             if (paymentUrl) {
+                // Persist order context so success/fail pages can use it
+                try {
+                    sessionStorage.setItem("checkout_order_id", order?.id || "");
+                    sessionStorage.setItem("checkout_order_number", order?.orderNumber || "");
+                    sessionStorage.setItem("checkout_payment_method", formData.paymentMethod);
+                    sessionStorage.setItem("checkout_total", String(totalAmount));
+                } catch { /* sessionStorage might be unavailable */ }
+
                 toast.info("Redirecting to payment gateway...", {
-                    description: message || "Please complete your payment on the next page.",
+                    description: message || "Please complete your payment on the secure Konnect page.",
                 });
+
+                // Clear cart before redirect (items are reserved in the order)
+                if (isCartCheckout) {
+                    try { await clearCart(); } catch { /* best effort */ }
+                }
                 
-                // Small delay to show toast before redirect
+                // Redirect to Konnect payment page
                 setTimeout(() => {
                     window.location.href = paymentUrl;
-                }, 500);
+                }, 400);
                 return; // Don't clear submitting state as we're redirecting
             }
 
-            // Order created successfully (Cash on Delivery or direct payment)
+            // Order created successfully (Cash on Delivery — no redirect needed)
             toast.success("Order placed successfully!", {
                 description: message || `Order #${order.orderNumber} has been created. You will receive a confirmation email shortly.`,
             });
 
-            // Clear cart if this was a cart checkout
+            // Clear cart
             if (isCartCheckout) {
-                await clearCart();
+                try { await clearCart(); } catch { /* best effort */ }
             }
 
-            // Redirect to success page with order details
-            router.push(`/?order=success&orderNumber=${order.orderNumber}`);
+            // Redirect to success page
+            router.push(`/checkout/success?orderId=${order.id}&orderNumber=${order.orderNumber}&method=cod`);
         } catch (error: any) {
             console.error("Checkout error:", error);
             const errorMessage = error.message || "Failed to process order";
@@ -523,38 +500,33 @@ export default function CheckoutPage() {
 
     return (
         <main className="min-h-screen bg-gray-50 dark:bg-black text-gray-900 dark:text-white">
-            {/* Header */}
-            <header className="sticky top-0 z-50 border-b border-gray-200 dark:border-white/10 bg-white/80 dark:bg-black/80 backdrop-blur-xl">
-                <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-                    {/* Breadcrumb Navigation */}
-                    <nav className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                        <Link href="/" className="hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1">
-                            <Home className="h-4 w-4" />
-                            <span className="hidden sm:inline">Home</span>
-                        </Link>
-                        <span>/</span>
-                        <Link href="/leds" className="hover:text-gray-900 dark:hover:text-white transition-colors">
-                            Products
-                        </Link>
-                        {productId && checkoutItems.length > 0 && (
-                            <>
-                                <span>/</span>
-                                <span className="text-gray-900 dark:text-white truncate max-w-[200px] sm:max-w-none">
-                                    {checkoutItems[0].title}
-                                </span>
-                            </>
-                        )}
-                        {isCartCheckout && (
-                            <>
-                                <span>/</span>
-                                <span className="text-gray-900 dark:text-white">Checkout</span>
-                            </>
-                        )}
-                    </nav>
-                </div>
-            </header>
-
             <div className="container mx-auto px-4 py-8 max-w-5xl">
+                {/* Breadcrumb Navigation */}
+                <nav className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mb-6">
+                    <Link href="/" className="hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1">
+                        <Home className="h-4 w-4" />
+                        <span className="hidden sm:inline">Home</span>
+                    </Link>
+                    <span>/</span>
+                    <Link href="/leds" className="hover:text-gray-900 dark:hover:text-white transition-colors">
+                        Products
+                    </Link>
+                    {productId && checkoutItems.length > 0 && (
+                        <>
+                            <span>/</span>
+                            <span className="text-gray-900 dark:text-white truncate max-w-[200px] sm:max-w-none">
+                                {checkoutItems[0].title}
+                            </span>
+                        </>
+                    )}
+                    {isCartCheckout && (
+                        <>
+                            <span>/</span>
+                            <span className="text-gray-900 dark:text-white">Checkout</span>
+                        </>
+                    )}
+                </nav>
+
                 {/* Page Title */}
                 <div className="mb-8">
                     <h1 className="text-3xl font-bold flex items-center gap-2 mb-2 text-gray-900 dark:text-white">
@@ -632,7 +604,7 @@ export default function CheckoutPage() {
                                     </div>
 
                                     <div>
-                                        <Label htmlFor="dateOfBirth">Date of Birth *</Label>
+                                        <Label htmlFor="dateOfBirth">Date of Birth</Label>
                                         <Input
                                             id="dateOfBirth"
                                             type="date"
@@ -828,251 +800,144 @@ export default function CheckoutPage() {
                         {/* Step 2: Payment Method */}
                         {currentStep === "payment" && (
                             <div className="space-y-6 bg-white dark:bg-zinc-950 border border-gray-200 dark:border-white/10 rounded-xl p-6 shadow-sm dark:shadow-none">
-                                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Payment Method</h2>
+                                <div>
+                                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Payment Method</h2>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Choose how you&apos;d like to pay. All online payments are processed on the gateway&apos;s secure page.</p>
+                                </div>
                                 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <button
-                                        type="button"
-                                        onClick={() => handleInputChange("paymentMethod", "cash_on_delivery")}
-                                        className={`p-4 rounded-lg border-2 transition-all ${
-                                            formData.paymentMethod === "cash_on_delivery"
-                                                ? "border-blue-500 bg-blue-500/10"
-                                                : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                                        }`}
-                                    >
-                                        <Truck className="h-6 w-6 mb-2 text-blue-500" />
-                                        <div className="text-left">
-                                            <div className="font-semibold text-gray-900 dark:text-white">Cash on Delivery</div>
-                                            <div className="text-xs text-gray-500 dark:text-gray-400">Pay when you receive</div>
-                                        </div>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => handleInputChange("paymentMethod", "card")}
-                                        className={`p-4 rounded-lg border-2 transition-all ${
-                                            formData.paymentMethod === "card"
-                                                ? "border-blue-500 bg-blue-500/10"
-                                                : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                                        }`}
-                                    >
-                                        <CreditCard className="h-6 w-6 mb-2 text-blue-500" />
-                                        <div className="text-left">
-                                            <div className="font-semibold text-gray-900 dark:text-white">Credit/Debit Card</div>
-                                            <div className="text-xs text-gray-500 dark:text-gray-400">Visa, Mastercard</div>
-                                        </div>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => handleInputChange("paymentMethod", "paykassma")}
-                                        className={`p-4 rounded-lg border-2 transition-all ${
-                                            formData.paymentMethod === "paykassma"
-                                                ? "border-blue-500 bg-blue-500/10"
-                                                : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                                        }`}
-                                    >
-                                        <Smartphone className="h-6 w-6 mb-2 text-blue-500" />
-                                        <div className="text-left">
-                                            <div className="font-semibold text-gray-900 dark:text-white">Paykassma</div>
-                                            <div className="text-xs text-gray-500 dark:text-gray-400">Tunisian payment gateway</div>
-                                        </div>
-                                    </button>
-
+                                <div className="space-y-3">
+                                    {/* Mobile Payment — Konnect (Recommended) */}
                                     <button
                                         type="button"
                                         onClick={() => handleInputChange("paymentMethod", "mobile")}
-                                        className={`p-4 rounded-lg border-2 transition-all ${
+                                        className={`w-full p-5 rounded-xl border-2 transition-all text-left ${
                                             formData.paymentMethod === "mobile"
-                                                ? "border-blue-500 bg-blue-500/10"
-                                                : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                                                ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 ring-1 ring-blue-500/30"
+                                                : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-white/5"
                                         }`}
                                     >
-                                        <Smartphone className="h-6 w-6 mb-2 text-blue-500" />
-                                        <div className="text-left">
-                                            <div className="font-semibold text-gray-900 dark:text-white">Mobile Payment</div>
-                                            <div className="text-xs text-gray-500 dark:text-gray-400">D17, Flouci</div>
+                                        <div className="flex items-start gap-4">
+                                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                                                formData.paymentMethod === "mobile" ? "bg-blue-500 text-white" : "bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400"
+                                            }`}>
+                                                <Smartphone className="h-6 w-6" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-semibold text-gray-900 dark:text-white">Mobile Payment</span>
+                                                    <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">Recommended</span>
+                                                </div>
+                                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">D17, Flouci, e-DINAR SMART</p>
+                                                <div className="flex items-center gap-3 mt-2">
+                                                    <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">Powered by</span>
+                                                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">Konnect</span>
+                                                </div>
+                                            </div>
+                                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-1 ${
+                                                formData.paymentMethod === "mobile" ? "border-blue-500 bg-blue-500" : "border-gray-300 dark:border-gray-600"
+                                            }`}>
+                                                {formData.paymentMethod === "mobile" && (
+                                                    <div className="w-2 h-2 rounded-full bg-white" />
+                                                )}
+                                            </div>
+                                        </div>
+                                    </button>
+
+                                    {/* Card Payment — via Konnect gateway */}
+                                    <button
+                                        type="button"
+                                        onClick={() => handleInputChange("paymentMethod", "card_gateway")}
+                                        className={`w-full p-5 rounded-xl border-2 transition-all text-left ${
+                                            formData.paymentMethod === "card_gateway"
+                                                ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 ring-1 ring-blue-500/30"
+                                                : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-white/5"
+                                        }`}
+                                    >
+                                        <div className="flex items-start gap-4">
+                                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                                                formData.paymentMethod === "card_gateway" ? "bg-blue-500 text-white" : "bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400"
+                                            }`}>
+                                                <CreditCard className="h-6 w-6" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <span className="font-semibold text-gray-900 dark:text-white">Credit / Debit Card</span>
+                                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Visa, Mastercard, e-DINAR</p>
+                                                <div className="flex items-center gap-3 mt-2">
+                                                    <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">Secure redirect via</span>
+                                                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">Konnect</span>
+                                                </div>
+                                            </div>
+                                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-1 ${
+                                                formData.paymentMethod === "card_gateway" ? "border-blue-500 bg-blue-500" : "border-gray-300 dark:border-gray-600"
+                                            }`}>
+                                                {formData.paymentMethod === "card_gateway" && (
+                                                    <div className="w-2 h-2 rounded-full bg-white" />
+                                                )}
+                                            </div>
+                                        </div>
+                                    </button>
+
+                                    {/* Cash on Delivery */}
+                                    <button
+                                        type="button"
+                                        onClick={() => handleInputChange("paymentMethod", "cash_on_delivery")}
+                                        className={`w-full p-5 rounded-xl border-2 transition-all text-left ${
+                                            formData.paymentMethod === "cash_on_delivery"
+                                                ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 ring-1 ring-blue-500/30"
+                                                : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-white/5"
+                                        }`}
+                                    >
+                                        <div className="flex items-start gap-4">
+                                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                                                formData.paymentMethod === "cash_on_delivery" ? "bg-blue-500 text-white" : "bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400"
+                                            }`}>
+                                                <Truck className="h-6 w-6" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <span className="font-semibold text-gray-900 dark:text-white">Cash on Delivery</span>
+                                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Pay in cash when your order arrives</p>
+                                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">No online payment required</p>
+                                            </div>
+                                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-1 ${
+                                                formData.paymentMethod === "cash_on_delivery" ? "border-blue-500 bg-blue-500" : "border-gray-300 dark:border-gray-600"
+                                            }`}>
+                                                {formData.paymentMethod === "cash_on_delivery" && (
+                                                    <div className="w-2 h-2 rounded-full bg-white" />
+                                                )}
+                                            </div>
                                         </div>
                                     </button>
                                 </div>
 
-                                {formData.paymentMethod === "card" && (
-                                    <div className="mt-6 p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-4 bg-gray-50 dark:bg-black/30">
-                                        <h4 className="font-medium text-gray-900 dark:text-white">Card Gateway Selection</h4>
-                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-                                            <button
-                                                type="button"
-                                                onClick={() => handleInputChange("cardGateway", "monetique")}
-                                                className={`p-3 rounded-lg border-2 transition-all text-left ${
-                                                    formData.cardGateway === "monetique"
-                                                        ? "border-blue-500 bg-blue-500/10"
-                                                        : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                                                }`}
-                                            >
-                                                <div className="font-semibold text-sm text-gray-900 dark:text-white">e-DINAR</div>
-                                                <div className="text-xs text-gray-500 dark:text-gray-400">Monétique Tunisienne</div>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleInputChange("cardGateway", "redpay")}
-                                                className={`p-3 rounded-lg border-2 transition-all text-left ${
-                                                    formData.cardGateway === "redpay"
-                                                        ? "border-blue-500 bg-blue-500/10"
-                                                        : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                                                }`}
-                                            >
-                                                <div className="font-semibold text-sm text-gray-900 dark:text-white">RedPay</div>
-                                                <div className="text-xs text-gray-500 dark:text-gray-400">Tunisian gateway</div>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleInputChange("cardGateway", "orange")}
-                                                className={`p-3 rounded-lg border-2 transition-all text-left ${
-                                                    formData.cardGateway === "orange"
-                                                        ? "border-blue-500 bg-blue-500/10"
-                                                        : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                                                }`}
-                                            >
-                                                <div className="font-semibold text-sm text-gray-900 dark:text-white">Orange Money</div>
-                                                <div className="text-xs text-gray-500 dark:text-gray-400">Orange Tunisia</div>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleInputChange("cardGateway", "paykassma_card")}
-                                                className={`p-3 rounded-lg border-2 transition-all text-left ${
-                                                    formData.cardGateway === "paykassma_card"
-                                                        ? "border-blue-500 bg-blue-500/10"
-                                                        : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                                                }`}
-                                            >
-                                                <div className="font-semibold text-sm text-gray-900 dark:text-white">Paykassma</div>
-                                                <div className="text-xs text-gray-500 dark:text-gray-400">Card payment</div>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleInputChange("cardGateway", "other")}
-                                                className={`p-3 rounded-lg border-2 transition-all text-left ${
-                                                    formData.cardGateway === "other"
-                                                        ? "border-blue-500 bg-blue-500/10"
-                                                        : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
-                                                }`}
-                                            >
-                                                <div className="font-semibold text-sm text-gray-900 dark:text-white">Other</div>
-                                                <div className="text-xs text-gray-500 dark:text-gray-400">Visa, Mastercard</div>
-                                            </button>
+                                {/* Info box for selected payment method */}
+                                {formData.paymentMethod !== "cash_on_delivery" && (
+                                    <div className="mt-2 p-4 rounded-xl border border-blue-200 dark:border-blue-800/30 bg-blue-50 dark:bg-blue-900/10 space-y-3">
+                                        <div className="flex items-center gap-2">
+                                            <Lock className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                            <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                                                How it works
+                                            </p>
                                         </div>
-
-                                        {formData.cardGateway === "other" && (
-                                            <>
-                                                <h4 className="font-medium mt-6 text-gray-900 dark:text-white">Card Details</h4>
-                                                
-                                                <div>
-                                                    <Label htmlFor="cardholderName">Cardholder Name *</Label>
-                                                    <Input
-                                                        id="cardholderName"
-                                                        value={formData.cardholderName}
-                                                        onChange={(e) => handleInputChange("cardholderName", e.target.value)}
-                                                        placeholder="John Doe"
-                                                        className={errors.cardholderName ? "border-red-500" : ""}
-                                                    />
-                                                    {errors.cardholderName && (
-                                                        <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-                                                            <AlertCircle className="h-3 w-3" />
-                                                            {errors.cardholderName}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </>
-                                        )}
-                                        
-                                        {formData.cardGateway !== "other" && (
-                                            <div className="p-4 border border-blue-500/50 rounded-lg bg-blue-50 dark:bg-blue-500/5">
-                                                <p className="text-sm text-gray-700 dark:text-gray-300">
-                                                    {formData.cardGateway === "monetique" && "You will be redirected to e-DINAR (Monétique Tunisienne) secure payment page to complete your transaction."}
-                                                    {formData.cardGateway === "redpay" && "You will be redirected to RedPay secure payment page to complete your transaction."}
-                                                    {formData.cardGateway === "orange" && "You will be redirected to Orange Money secure payment page to complete your transaction."}
-                                                    {formData.cardGateway === "paykassma_card" && "You will be redirected to Paykassma secure payment page for card payment."}
-                                                </p>
+                                        <ol className="space-y-2 text-sm text-gray-700 dark:text-gray-300 list-decimal list-inside">
+                                            <li>You click <strong>&ldquo;Complete Purchase&rdquo;</strong> on the next step</li>
+                                            <li>You&apos;re securely redirected to <strong>Konnect</strong> payment page</li>
+                                            <li>Enter your {formData.paymentMethod === "mobile" ? "mobile payment PIN" : "card details"} on <strong>their secure page</strong></li>
+                                            <li>After payment, you&apos;re redirected back here with confirmation</li>
+                                        </ol>
+                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2 border-t border-blue-200 dark:border-blue-800/30">
+                                            <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                                <Lock className="h-3 w-3" />
+                                                <span>256-bit SSL</span>
                                             </div>
-                                        )}
-
-                                        <div>
-                                            <Label htmlFor="cardNumber">Card Number *</Label>
-                                            <Input
-                                                id="cardNumber"
-                                                value={formData.cardNumber}
-                                                onChange={(e) => handleCardNumberChange(e.target.value.replace(/\D/g, ""))}
-                                                placeholder="1234 5678 9012 3456"
-                                                maxLength={19}
-                                                className={errors.cardNumber ? "border-red-500" : ""}
-                                            />
-                                            {errors.cardNumber && (
-                                                <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-                                                    <AlertCircle className="h-3 w-3" />
-                                                    {errors.cardNumber}
-                                                </p>
-                                            )}
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <Label htmlFor="cardExpiry">Expiry Date (MM/YY) *</Label>
-                                                <Input
-                                                    id="cardExpiry"
-                                                    value={formData.cardExpiry}
-                                                    onChange={(e) => handleCardExpiryChange(e.target.value)}
-                                                    placeholder="12/25"
-                                                    maxLength={5}
-                                                    className={errors.cardExpiry ? "border-red-500" : ""}
-                                                />
-                                                {errors.cardExpiry && (
-                                                    <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-                                                        <AlertCircle className="h-3 w-3" />
-                                                        {errors.cardExpiry}
-                                                    </p>
-                                                )}
+                                            <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                                <CheckCircle2 className="h-3 w-3" />
+                                                <span>PCI DSS compliant</span>
                                             </div>
-
-                                            <div>
-                                                <Label htmlFor="cardCvv">CVV *</Label>
-                                                <Input
-                                                    id="cardCvv"
-                                                    type="password"
-                                                    value={formData.cardCvv}
-                                                    onChange={(e) => handleInputChange("cardCvv", e.target.value.replace(/\D/g, "").slice(0, 4))}
-                                                    placeholder="123"
-                                                    maxLength={4}
-                                                    className={errors.cardCvv ? "border-red-500" : ""}
-                                                />
-                                                {errors.cardCvv && (
-                                                    <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-                                                        <AlertCircle className="h-3 w-3" />
-                                                        {errors.cardCvv}
-                                                    </p>
-                                                )}
+                                            <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                                <CheckCircle2 className="h-3 w-3" />
+                                                <span>We never see your card data</span>
                                             </div>
                                         </div>
-
-                                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                                            <Lock className="h-3 w-3" />
-                                            <span>Your card details are encrypted and secure</span>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {formData.paymentMethod === "paykassma" && (
-                                    <div className="mt-6 p-4 border border-blue-500/50 rounded-lg bg-blue-50 dark:bg-blue-500/5">
-                                        <p className="text-sm text-gray-700 dark:text-gray-300">
-                                            You will be redirected to Paykassma&apos;s secure payment page to complete your transaction.
-                                        </p>
-                                    </div>
-                                )}
-
-                                {formData.paymentMethod === "mobile" && (
-                                    <div className="mt-6 p-4 border border-blue-500/50 rounded-lg bg-blue-50 dark:bg-blue-500/5">
-                                        <p className="text-sm text-gray-700 dark:text-gray-300">
-                                            Mobile payment options (D17, Flouci) will be available at checkout.
-                                        </p>
                                     </div>
                                 )}
                             </div>
@@ -1109,20 +974,17 @@ export default function CheckoutPage() {
 
                                 <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-black/30">
                                     <h4 className="font-medium mb-3 text-gray-900 dark:text-white">Payment Method</h4>
-                                    <p className="text-sm text-gray-700 dark:text-gray-300 capitalize">
+                                    <p className="text-sm text-gray-700 dark:text-gray-300">
                                         {formData.paymentMethod === "cash_on_delivery" && "Cash on Delivery"}
-                                        {formData.paymentMethod === "card" && (
-                                            <>
-                                                {formData.cardGateway === "monetique" && "e-DINAR (Monétique)"}
-                                                {formData.cardGateway === "redpay" && "RedPay"}
-                                                {formData.cardGateway === "orange" && "Orange Money"}
-                                                {formData.cardGateway === "paykassma_card" && "Paykassma Card"}
-                                                {formData.cardGateway === "other" && `Card ending in ${formData.cardNumber.slice(-4) || "****"}`}
-                                            </>
-                                        )}
-                                        {formData.paymentMethod === "paykassma" && "Paykassma"}
-                                        {formData.paymentMethod === "mobile" && "Mobile Payment"}
+                                        {formData.paymentMethod === "card_gateway" && "Credit / Debit Card (via Konnect)"}
+                                        {formData.paymentMethod === "mobile" && "Mobile Payment — D17, Flouci (via Konnect)"}
                                     </p>
+                                    {formData.paymentMethod !== "cash_on_delivery" && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1">
+                                            <Lock className="h-3 w-3" />
+                                            You&apos;ll be redirected to Konnect&apos;s secure payment page
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -1172,10 +1034,22 @@ export default function CheckoutPage() {
                 </div>
 
                 {/* Footer Actions */}
-                <div className="flex justify-between items-center pt-8 border-t border-gray-200 dark:border-white/10 mt-8">
-                   
-                    <div className="flex gap-2 justify-between w-full">
-                        {currentStep !== "info" && (
+                {/* Footer Actions */}
+                <div className="flex items-center justify-between pt-8 border-t border-gray-200 dark:border-white/10 mt-8">
+                    {/* Left side */}
+                    <div className="flex items-center gap-3">
+                        {currentStep === "info" ? (
+                            <Link href="/leds">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                >
+                                    <ShoppingBag className="h-4 w-4 mr-2" />
+                                    Back to Shop
+                                </Button>
+                            </Link>
+                        ) : (
                             <Button
                                 type="button"
                                 variant="outline"
@@ -1183,9 +1057,14 @@ export default function CheckoutPage() {
                                 className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                                 disabled={isSubmitting}
                             >
+                                <ArrowLeft className="h-4 w-4 mr-2" />
                                 Previous
                             </Button>
                         )}
+                    </div>
+
+                    {/* Right side */}
+                    <div>
                         {currentStep !== "review" ? (
                             <Button
                                 type="button"
@@ -1193,6 +1072,7 @@ export default function CheckoutPage() {
                                 disabled={isSubmitting}
                             >
                                 Next
+                                <ArrowRight className="h-4 w-4 ml-2" />
                             </Button>
                         ) : (
                             <Button

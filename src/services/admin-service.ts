@@ -6,6 +6,11 @@ import { TokenManager } from './auth-service';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
+const toFiniteNumberOr = (value: unknown, fallback: number): number => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -20,13 +25,18 @@ export interface AdminProduct {
     salePrice?: number;
     purchasePrice?: number;
     stock: number;
-    description?: string;
-    summary?: string;
     supplier?: string;
-    size?: number;
+    tvBacklightType?: string;
+    tvPanelType?: string;
+    tvSizeInch?: number;
+    stripCount?: string;
+    ledCount?: string;
+    voltage?: number;
+    length?: string;
     rating: number;
     tags: string[];
     images: string[];
+    config?: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -39,19 +49,48 @@ export interface CreateProductData {
     salePrice?: number;
     purchasePrice?: number;
     stock: number;
-    description?: string;
-    summary?: string;
     supplier?: string;
-    size?: number;
+    tvBacklightType?: string;
+    tvPanelType?: string;
+    tvSizeInch?: number;
+    stripCount?: string;
+    ledCount?: string;
+    voltage?: number;
+    length?: string;
     rating?: number;
     tags?: string[];
     images?: string[];
+    config?: string;
 }
 
 export interface UpdateProductData extends Partial<CreateProductData> {}
 
+function normalizeAdminProduct(product: AdminProduct): AdminProduct {
+    return {
+        ...product,
+        price: toFiniteNumberOr(product.price, 0),
+        salePrice: product.salePrice == null ? undefined : toFiniteNumberOr(product.salePrice, 0),
+        purchasePrice: product.purchasePrice == null ? undefined : toFiniteNumberOr(product.purchasePrice, 0),
+        stock: toFiniteNumberOr(product.stock, 0),
+        tvSizeInch: product.tvSizeInch == null ? undefined : toFiniteNumberOr(product.tvSizeInch, 0),
+        voltage: product.voltage == null ? undefined : toFiniteNumberOr(product.voltage, 0),
+        rating: toFiniteNumberOr(product.rating, 0),
+    };
+}
+
 // Order Types
-export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
+// Allow known statuses + any legacy/unknown statuses from backend.
+export type OrderStatus =
+    | 'PENDING'
+    | 'PICKUP'
+    | 'DELIVERED'
+    | 'CONFIRMED'
+    | 'PROCESSING'
+    | 'SHIPPED'
+    | 'CANCELLED'
+    | (string & {});
+
+export type PickupMethod = 'CUSTOMER_PICKUP' | 'COURIER_PICKUP' | (string & {});
 
 export interface OrderItem {
     id: string;
@@ -79,6 +118,7 @@ export interface AdminOrder {
     id: string;
     orderNumber: string;
     status: OrderStatus;
+    pickupMethod?: PickupMethod | null;
     totalAmount: number;
     paymentMethod: string;
     fullName: string;
@@ -141,6 +181,21 @@ export interface PaginatedResponse<T> {
     totalPages: number;
 }
 
+// Dashboard Overview
+export interface DashboardOverviewResponse {
+    sales: { day: number; month: number; year: number };
+    orderVolume: { successfulDeliveries: number; pendingPickups: number };
+    inventoryHealth: {
+        lowStockProducts: Array<{
+            id?: string;
+            title?: string;
+            modelName?: string;
+            reference?: string;
+            stock?: number;
+        }>;
+    };
+}
+
 // ============================================================================
 // Helper: Admin Auth Fetch
 // ============================================================================
@@ -199,6 +254,8 @@ export const AdminService = {
         limit = 20,
         filters?: {
             search?: string;
+            modelName?: string;
+            reference?: string;
             brands?: string[];
             sizes?: number[];
             minPrice?: number;
@@ -212,31 +269,45 @@ export const AdminService = {
         });
 
         if (filters?.search) params.append('search', filters.search);
+        if (filters?.modelName) params.append('modelName', filters.modelName);
+        if (filters?.reference) params.append('reference', filters.reference);
         if (filters?.brands?.length) params.append('brands', filters.brands.join(','));
         if (filters?.sizes?.length) params.append('sizes', filters.sizes.join(','));
         if (filters?.minPrice !== undefined) params.append('minPrice', filters.minPrice.toString());
         if (filters?.maxPrice !== undefined) params.append('maxPrice', filters.maxPrice.toString());
         if (filters?.inStock !== undefined) params.append('inStock', filters.inStock.toString());
 
-        return adminFetch<PaginatedResponse<AdminProduct>>(`/products?${params.toString()}`);
+        const raw = await adminFetch<Record<string, unknown>>(`/products?${params.toString()}`);
+        // API nests pagination inside a `pagination` object
+        const pag = (raw.pagination ?? raw) as Record<string, unknown>;
+        return {
+            data: (Array.isArray(raw.data) ? raw.data : []).map(normalizeAdminProduct),
+            total: Number(pag.total ?? 0) || 0,
+            page: Number(pag.page ?? page) || page,
+            limit: Number(pag.limit ?? limit) || limit,
+            totalPages: Number(pag.totalPages ?? 1) || 1,
+        };
     },
 
     async getProduct(id: string): Promise<AdminProduct> {
-        return adminFetch<AdminProduct>(`/products/${id}`);
+        const product = await adminFetch<AdminProduct>(`/products/${id}`);
+        return normalizeAdminProduct(product);
     },
 
     async createProduct(data: CreateProductData): Promise<AdminProduct> {
-        return adminFetch<AdminProduct>('/products', {
+        const product = await adminFetch<AdminProduct>('/products', {
             method: 'POST',
             body: JSON.stringify(data),
         });
+        return normalizeAdminProduct(product);
     },
 
     async updateProduct(id: string, data: UpdateProductData): Promise<AdminProduct> {
-        return adminFetch<AdminProduct>(`/products/${id}`, {
+        const product = await adminFetch<AdminProduct>(`/products/${id}`, {
             method: 'PUT',
             body: JSON.stringify(data),
         });
+        return normalizeAdminProduct(product);
     },
 
     async deleteProduct(id: string): Promise<void> {
@@ -262,6 +333,9 @@ export const AdminService = {
         filters?: {
             status?: OrderStatus;
             userId?: string;
+            clientName?: string;
+            email?: string;
+            phoneNumber?: string;
         }
     ): Promise<PaginatedResponse<AdminOrder>> {
         const params = new URLSearchParams({
@@ -271,6 +345,9 @@ export const AdminService = {
 
         if (filters?.status) params.append('status', filters.status);
         if (filters?.userId) params.append('userId', filters.userId);
+        if (filters?.clientName) params.append('clientName', filters.clientName);
+        if (filters?.email) params.append('email', filters.email);
+        if (filters?.phoneNumber) params.append('phoneNumber', filters.phoneNumber);
 
         return adminFetch<PaginatedResponse<AdminOrder>>(`/orders/admin/all?${params.toString()}`);
     },
@@ -283,11 +360,27 @@ export const AdminService = {
         return adminFetch<AdminOrder[]>(`/orders/admin/user/${userId}`);
     },
 
-    async updateOrderStatus(id: string, status: OrderStatus): Promise<AdminOrder> {
+    async updateOrderStatus(
+        id: string,
+        input: { status: OrderStatus; pickupMethod?: PickupMethod | null }
+    ): Promise<AdminOrder> {
         return adminFetch<AdminOrder>(`/orders/${id}/status`, {
             method: 'PUT',
-            body: JSON.stringify({ status }),
+            body: JSON.stringify(input),
         });
+    },
+
+    // =========================================================================
+    // Dashboard
+    // =========================================================================
+
+    async getDashboardOverview(filters?: { lowStockThreshold?: number }): Promise<DashboardOverviewResponse> {
+        const params = new URLSearchParams();
+        if (filters?.lowStockThreshold !== undefined) {
+            params.append('lowStockThreshold', String(filters.lowStockThreshold));
+        }
+        const qs = params.toString();
+        return adminFetch<DashboardOverviewResponse>(`/dashboard/overview${qs ? `?${qs}` : ""}`);
     },
 
     // =========================================================================

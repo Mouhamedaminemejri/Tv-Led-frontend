@@ -43,25 +43,7 @@ export default function EditProductPage() {
         setError(null);
 
         try {
-            // Transform form data to match API
-            const productData = {
-                title: formData.title,
-                reference: formData.reference,
-                brand: formData.brand,
-                price: parseFloat(formData.price) || 0,
-                salePrice: formData.salePrice ? parseFloat(formData.salePrice) : undefined,
-                purchasePrice: formData.purchasePrice ? parseFloat(formData.purchasePrice) : undefined,
-                stock: parseInt(formData.stock) || 0,
-                description: formData.description || undefined,
-                summary: formData.summary || undefined,
-                supplier: formData.supplier || undefined,
-                size: formData.size ? parseInt(formData.size) : undefined,
-                rating: formData.rating ? parseFloat(formData.rating) : 0,
-                tags: formData.tags || [],
-                images: formData.images || [],
-            };
-
-            await AdminService.updateProduct(productId, productData);
+            await AdminService.updateProduct(productId, formData);
             router.push('/admin/products');
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to update product");
@@ -140,15 +122,20 @@ export default function EditProductPage() {
                                 reference: product.reference,
                                 brand: product.brand,
                                 title: product.title,
-                                summary: product.summary || "",
                                 purchasePrice: product.purchasePrice?.toString() || "",
                                 supplier: product.supplier || "",
                                 salePrice: product.salePrice?.toString() || "",
                                 price: product.price?.toString() || "",
-                                description: product.description || "",
-                                size: product.size?.toString() || "",
+                                tvBacklightType: product.tvBacklightType || "",
+                                tvPanelType: product.tvPanelType || "",
+                                tvSizeInch: product.tvSizeInch?.toString() || "",
+                                stripCount: product.stripCount || "",
+                                ledCount: product.ledCount || "",
+                                voltage: product.voltage?.toString() || "",
+                                length: product.length || "",
                                 stock: product.stock?.toString() || "",
                                 rating: product.rating?.toString() || "0",
+                                config: product.config || "",
                                 images: product.images || [],
                                 tags: product.tags || [],
                             }}

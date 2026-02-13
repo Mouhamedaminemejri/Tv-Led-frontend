@@ -14,7 +14,6 @@ import {
     Loader2,
     AlertCircle,
     CheckCircle,
-    ArrowLeft,
     Shield,
     Calendar,
     Edit3,
@@ -25,7 +24,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/auth-context";
-import { useTheme } from "@/context/theme-context";
 import { cn } from "@/lib/utils";
 
 // ============================================================================
@@ -51,7 +49,6 @@ interface ProfileFormData {
 export default function AccountPage() {
     const router = useRouter();
     const { user, isAuthenticated, isLoading, updateProfile } = useAuth();
-    const { isDarkMode } = useTheme();
     
     const [isEditing, setIsEditing] = React.useState(false);
     const [isSaving, setIsSaving] = React.useState(false);
@@ -190,21 +187,13 @@ export default function AccountPage() {
 
     return (
         <main className="min-h-screen bg-gray-50 dark:bg-black">
-            {/* Header */}
-            <header className="sticky top-0 z-40 border-b border-gray-200 dark:border-white/10 bg-white/80 dark:bg-black/80 backdrop-blur-xl">
-                <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                        <Link
-                            href="/"
-                            className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-                        >
-                            <ArrowLeft className="h-5 w-5" />
-                            <span className="hidden sm:inline">Back to Home</span>
-                        </Link>
-                        <div className="h-6 w-px bg-gray-200 dark:bg-white/10" />
-                        <h1 className="text-xl font-bold text-gray-900 dark:text-white">My Account</h1>
+            <div className="container mx-auto px-4 py-8 max-w-4xl">
+                <div className="flex items-start justify-between gap-4 mb-6">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">My Account</h1>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">Manage your profile and preferences.</p>
                     </div>
-                    
+
                     {!isEditing ? (
                         <Button
                             onClick={() => setIsEditing(true)}
@@ -242,9 +231,6 @@ export default function AccountPage() {
                         </div>
                     )}
                 </div>
-            </header>
-
-            <div className="container mx-auto px-4 py-8 max-w-4xl">
                 {/* Error Message */}
                 {error && (
                     <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-center gap-3">

@@ -30,6 +30,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+    { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/products", label: "Products", icon: Package },
     { href: "/admin/orders", label: "Orders", icon: ShoppingCart },
     { href: "/admin/users", label: "Users", icon: Users },
@@ -136,7 +137,12 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
-    const { isDarkMode, toggleTheme } = useTheme();
+    const { theme, resolvedTheme, setTheme } = useTheme();
+    const isDarkMode = resolvedTheme === "dark";
+    const toggleTheme = () => {
+        // Toggle between explicit light/dark (avoid getting "stuck" on system)
+        setTheme(isDarkMode ? "light" : "dark");
+    };
     const { user } = useAuth();
     const [sidebarOpen, setSidebarOpen] = React.useState(true);
     const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
@@ -165,7 +171,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                                     <Menu className="h-5 w-5" />
                                 )}
                             </Button>
-                            <Link href="/admin/products" className="flex items-center gap-2">
+                            <Link href="/admin/dashboard" className="flex items-center gap-2">
                                 <LayoutDashboard className="h-6 w-6 text-blue-600 dark:text-blue-400" />
                                 <span className="font-bold text-gray-900 dark:text-white">Admin Panel</span>
                             </Link>
@@ -236,7 +242,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                         {/* Sidebar Header */}
                         <div className="flex items-center justify-between h-20 px-4 border-b border-gray-200 dark:border-white/10">
                             <Link 
-                                href="/admin/products" 
+                                href="/admin/dashboard" 
                                 className={cn(
                                     "flex items-center gap-3 transition-all",
                                     !sidebarOpen && "justify-center w-full"

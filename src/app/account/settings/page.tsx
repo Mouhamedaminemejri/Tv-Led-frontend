@@ -125,22 +125,20 @@ export default function AccountSettingsPage() {
 
     return (
         <main className="min-h-screen bg-gray-50 dark:bg-black">
-            {/* Header */}
-            <header className="sticky top-0 z-40 border-b border-gray-200 dark:border-white/10 bg-white/80 dark:bg-black/80 backdrop-blur-xl">
-                <div className="container mx-auto px-4 h-16 flex items-center gap-4">
-                    <Link
-                        href="/account"
-                        className="flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-                    >
-                        <ArrowLeft className="h-5 w-5" />
-                        <span className="hidden sm:inline">Back to Account</span>
-                    </Link>
-                    <div className="h-6 w-px bg-gray-200 dark:bg-white/10" />
-                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">Account Settings</h1>
-                </div>
-            </header>
-
             <div className="container mx-auto px-4 py-8 max-w-2xl space-y-6">
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <Link
+                            href="/account"
+                            className="inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                        >
+                            <ArrowLeft className="h-4 w-4" />
+                            Back to Account
+                        </Link>
+                        <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Account Settings</h1>
+                    </div>
+                </div>
+
                 {/* Error Message */}
                 {error && (
                     <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-center gap-3">
