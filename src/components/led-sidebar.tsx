@@ -42,13 +42,47 @@ interface LedSidebarProps {
 // VIDEO_GUIDE is now dynamic based on facets.videoGuide
 
 export function LedSidebar({ filters, setFilters, facets }: LedSidebarProps) {
+    // Sort facets: selected first, then available (count > 0), then disabled (count === 0)
+    const sortedManufacturers = React.useMemo(() => {
+        return [...facets.manufacturers].sort((a, b) => {
+            const aSelected = filters.manufacturers.includes(a.label) ? 1 : 0;
+            const bSelected = filters.manufacturers.includes(b.label) ? 1 : 0;
+            if (aSelected !== bSelected) return bSelected - aSelected;
+            const aAvailable = a.count > 0 ? 1 : 0;
+            const bAvailable = b.count > 0 ? 1 : 0;
+            return bAvailable - aAvailable;
+        });
+    }, [facets.manufacturers, filters.manufacturers]);
+
+    const sortedDiagonals = React.useMemo(() => {
+        return [...facets.diagonals].sort((a, b) => {
+            const aSelected = filters.diagonals.includes(a.id) ? 1 : 0;
+            const bSelected = filters.diagonals.includes(b.id) ? 1 : 0;
+            if (aSelected !== bSelected) return bSelected - aSelected;
+            const aAvailable = a.count > 0 ? 1 : 0;
+            const bAvailable = b.count > 0 ? 1 : 0;
+            return bAvailable - aAvailable;
+        });
+    }, [facets.diagonals, filters.diagonals]);
+
+    const sortedBacklightTypes = React.useMemo(() => {
+        return [...facets.backlightTypes].sort((a, b) => {
+            const aSelected = filters.backlightTypes.includes(a.id) ? 1 : 0;
+            const bSelected = filters.backlightTypes.includes(b.id) ? 1 : 0;
+            if (aSelected !== bSelected) return bSelected - aSelected;
+            const aAvailable = a.count > 0 ? 1 : 0;
+            const bAvailable = b.count > 0 ? 1 : 0;
+            return bAvailable - aAvailable;
+        });
+    }, [facets.backlightTypes, filters.backlightTypes]);
+
     // Show manufacturers with optional expand
     const [showAllManufacturers, setShowAllManufacturers] = React.useState(false);
-    const displayedManufacturers = showAllManufacturers ? facets.manufacturers : facets.manufacturers.slice(0, 7);
+    const displayedManufacturers = showAllManufacturers ? sortedManufacturers : sortedManufacturers.slice(0, 7);
 
     // Show diagonals with optional expand
     const [showAllDiagonals, setShowAllDiagonals] = React.useState(false);
-    const displayedDiagonals = showAllDiagonals ? facets.diagonals : facets.diagonals.slice(0, 7);
+    const displayedDiagonals = showAllDiagonals ? sortedDiagonals : sortedDiagonals.slice(0, 7);
 
     const handleCheckboxChange = (category: keyof FilterState, value: string, checked: boolean) => {
         setFilters(prev => {
@@ -140,7 +174,7 @@ export function LedSidebar({ filters, setFilters, facets }: LedSidebarProps) {
                                     </div>
                                 );
                             })}
-                            {facets.manufacturers.length > 7 && (
+                            {sortedManufacturers.length > 7 && (
                                 <button
                                     type="button"
                                     className="inline-flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mt-1"
@@ -186,7 +220,7 @@ export function LedSidebar({ filters, setFilters, facets }: LedSidebarProps) {
                                     </div>
                                 );
                             })}
-                            {facets.diagonals.length > 7 && (
+                            {sortedDiagonals.length > 7 && (
                                 <button
                                     type="button"
                                     className="inline-flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mt-1"
@@ -207,8 +241,8 @@ export function LedSidebar({ filters, setFilters, facets }: LedSidebarProps) {
                     </AccordionTrigger>
                     <AccordionContent className="pb-3">
                         <div className="space-y-2">
-                            {facets.backlightTypes.length === 0 && <div className="text-sm text-gray-700 dark:text-gray-400">No types found</div>}
-                            {facets.backlightTypes.map((item) => {
+                            {sortedBacklightTypes.length === 0 && <div className="text-sm text-gray-700 dark:text-gray-400">No types found</div>}
+                            {sortedBacklightTypes.map((item) => {
                                 const isDisabled = item.count === 0;
                                 const isChecked = filters.backlightTypes.includes(item.id);
                                 return (

@@ -289,6 +289,11 @@ function LedPageInner() {
             sizeCounts[size] = filtered.length;
         });
 
+        // Disable "Universal" diagonal when a brand is selected
+        if (filters.manufacturers.length > 0) {
+            sizeCounts['0'] = 0;
+        }
+
         // Calculate backlight facets (all products are "Direct LED" for now)
         const backlightData = filterDataExcluding('backlightTypes');
         const backlightCounts: Record<string, number> = {};

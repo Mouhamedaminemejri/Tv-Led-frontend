@@ -1104,7 +1104,7 @@ export default function ProductDetailPage() {
                                 <div>
                                     Stock number:{" "}
                                     <span className="text-gray-900 dark:text-white font-semibold">
-                                        {product.suk || product.reference || "—"}
+                                        {product.reference  || "—"}
                                     </span>
                                 </div>
                                 <div>
