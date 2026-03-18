@@ -28,7 +28,7 @@ export default function Home() {
       icon: <MonitorPlay className="h-8 w-8 text-blue-500" />,
       color: "hover:border-blue-500/50",
       bg: "hover:bg-blue-500/5",
-      href: "#software"
+      href: "/software"
     },
     {
       title: "Repair Services",

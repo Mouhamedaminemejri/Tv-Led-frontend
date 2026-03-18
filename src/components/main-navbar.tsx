@@ -90,34 +90,40 @@ export function MainNavbar() {
           <div className="w-full max-w-xl">
             <SearchAutocomplete
               value={searchQuery}
+              searchTarget={pathname.startsWith("/software") ? "software" : "led"}
               onChange={(value) => {
                 setSearchQuery(value);
                 if (!value.trim()) {
-                  // If on /leds page and clearing, remove q param
-                  if (pathname.startsWith("/leds")) {
+                  if (pathname.startsWith("/leds") || pathname.startsWith("/software")) {
                     router.replace(pathname, { scroll: false });
                   }
                 }
               }}
-              onSelect={(value, type, product) => {
+              onSelect={(value, type, product, ctx) => {
+                const target = ctx?.searchTarget ?? (pathname.startsWith("/software") ? "software" : "led");
+                const basePath = target === "software" ? "/software" : "/leds";
                 if (type === "product" && product?.id) {
-                  router.push(`/leds/${product.id}`);
+                  router.push(`${basePath}/${product.id}`);
                   setSearchQuery("");
                   return;
                 }
                 const p = new URLSearchParams();
                 if (type === "brand") {
                   p.set("brand", value);
+                } else if (target === "software" && (type === "model" || type === "reference")) {
+                  p.set("model", value);
                 } else {
                   p.set("q", value);
                 }
-                router.push(`/leds?${p.toString()}`);
+                router.push(`${basePath}?${p.toString()}`);
                 setSearchQuery("");
               }}
               onSubmit={(value) => {
+                const target = pathname.startsWith("/software") ? "software" : "led";
+                const basePath = target === "software" ? "/software" : "/leds";
                 const p = new URLSearchParams();
                 p.set("q", value);
-                router.push(`/leds?${p.toString()}`);
+                router.push(`${basePath}?${p.toString()}`);
                 setSearchQuery("");
               }}
               placeholder="Search by TV Model, Part Number, or Brand..."
@@ -150,23 +156,29 @@ export function MainNavbar() {
             {/* Mobile search */}
             <SearchAutocomplete
               value={searchQuery}
+              searchTarget={pathname.startsWith("/software") ? "software" : "led"}
               onChange={setSearchQuery}
-              onSelect={(value, type, product) => {
+              onSelect={(value, type, product, ctx) => {
+                const target = ctx?.searchTarget ?? (pathname.startsWith("/software") ? "software" : "led");
+                const basePath = target === "software" ? "/software" : "/leds";
                 if (type === "product" && product?.id) {
-                  router.push(`/leds/${product.id}`);
+                  router.push(`${basePath}/${product.id}`);
                   setSearchQuery("");
                   setMobileOpen(false);
                   return;
                 }
                 const p = new URLSearchParams();
                 if (type === "brand") p.set("brand", value);
+                else if (target === "software" && (type === "model" || type === "reference")) p.set("model", value);
                 else p.set("q", value);
-                router.push(`/leds?${p.toString()}`);
+                router.push(`${basePath}?${p.toString()}`);
                 setSearchQuery("");
                 setMobileOpen(false);
               }}
               onSubmit={(value) => {
-                router.push(`/leds?q=${encodeURIComponent(value)}`);
+                const target = pathname.startsWith("/software") ? "software" : "led";
+                const basePath = target === "software" ? "/software" : "/leds";
+                router.push(`${basePath}?q=${encodeURIComponent(value)}`);
                 setSearchQuery("");
                 setMobileOpen(false);
               }}
@@ -178,6 +190,9 @@ export function MainNavbar() {
               </Link>
               <Link href="/leds" onClick={() => setMobileOpen(false)} className="py-2 px-2 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10">
                 LED Shop
+              </Link>
+              <Link href="/software" onClick={() => setMobileOpen(false)} className="py-2 px-2 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10">
+                TV Software & Firmware
               </Link>
             </nav>
           </div>

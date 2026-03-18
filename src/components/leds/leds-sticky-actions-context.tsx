@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import type { LedProduct } from "@/services/product-service";
+import type { SoftwareProduct } from "@/services/software-product-service";
 
 type StickyActionState = {
-  product: LedProduct | null;
+  product: LedProduct | SoftwareProduct | null;
   show: boolean;
   onAddToCart: (() => void) | null;
   onBuyNow: (() => void) | null;

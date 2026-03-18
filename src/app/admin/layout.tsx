@@ -16,7 +16,8 @@ import {
     Moon,
     ShieldAlert,
     Loader2,
-    LogIn
+    LogIn,
+    FileCode
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/context/theme-context";
@@ -32,6 +33,7 @@ interface NavItem {
 const navItems: NavItem[] = [
     { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/products", label: "Products", icon: Package },
+    { href: "/admin/software", label: "Software", icon: FileCode },
     { href: "/admin/orders", label: "Orders", icon: ShoppingCart },
     { href: "/admin/users", label: "Users", icon: Users },
 ];

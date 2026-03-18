@@ -5,6 +5,8 @@
 import { TokenManager } from './auth-service';
 import { GuestSession } from '@/utils/guest-session';
 
+export type CartItemType = "led" | "software";
+
 export interface CartItem {
     cartItemId?: string;
     id: string;
@@ -15,6 +17,14 @@ export interface CartItem {
     brand: string;
     reference: string;
     stock: number;
+    /** Required for software products - backend looks up in SoftwareProduct table when "software" */
+    itemType?: CartItemType;
+    /** Software fulfillment – from cart product object */
+    fulfillmentMethod?: "BOTH" | "PHYSICAL_USB_WITH_LINKS" | "EMAIL_DOWNLOAD_LINKS";
+    physicalUsbPrice?: number | null;
+    emailLinksPrice?: number | null;
+    /** Which option the user selected when adding (USB, Email, or Both) – backend should store & return */
+    selectedFulfillment?: "PHYSICAL_USB_WITH_LINKS" | "EMAIL_DOWNLOAD_LINKS" | "BOTH";
 }
 
 interface BackendCartResponse {
@@ -25,17 +35,26 @@ interface BackendCartResponse {
     itemsWithProducts: Array<{
         quantity: number;
         productId: string;
+        itemType?: CartItemType;
+        selectedFulfillment?: "PHYSICAL_USB_WITH_LINKS" | "EMAIL_DOWNLOAD_LINKS" | "BOTH";
+        fulfillmentChoice?: "PHYSICAL_USB_WITH_LINKS" | "EMAIL_DOWNLOAD_LINKS" | "BOTH";
         product: {
             id: string;
             title: string;
             brand: string;
             reference: string;
-            size: number;
+            size?: number;
             price: number;
             stock: number;
-            rating: number;
-            images: string[];
-            tags: string[];
+            rating?: number;
+            images?: string[];
+            tags?: string[];
+            itemType?: CartItemType;
+            fulfillmentMethod?: "BOTH" | "PHYSICAL_USB_WITH_LINKS" | "EMAIL_DOWNLOAD_LINKS";
+            physicalUsbPrice?: number | null;
+            emailLinksPrice?: number | null;
+            selectedFulfillment?: "PHYSICAL_USB_WITH_LINKS" | "EMAIL_DOWNLOAD_LINKS" | "BOTH";
+            fulfillmentChoice?: "PHYSICAL_USB_WITH_LINKS" | "EMAIL_DOWNLOAD_LINKS" | "BOTH";
         };
     }>;
     createdAt: string;
@@ -74,34 +93,42 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 // ============================================================================
 
 function parseCartResponse(data: BackendCartResponse | any[]): CartItem[] {
+    const mapProduct = (item: any, prod: any) => {
+        const isSoftware = item.itemType === 'software' || prod?.itemType === 'software' || prod?.fulfillmentMethod;
+        const base = {
+            cartItemId: item.productId || item.cartItemId,
+            id: prod?.id || item.productId || item.id,
+            quantity: item.quantity,
+            price: prod?.price ?? item.price,
+            title: prod?.title ?? item.title,
+            image: prod?.images?.[0] ?? item.image ?? (isSoftware ? '/file.svg' : '/led-product.png'),
+            brand: prod?.brand ?? item.brand,
+            reference: prod?.reference ?? item.reference,
+            stock: prod?.stock ?? item.stock,
+        };
+        const itemType = item.itemType ?? prod?.itemType;
+        if (isSoftware) {
+            const fulfillment = item.fulfillmentChoice ?? item.selectedFulfillment ?? prod?.fulfillmentChoice ?? prod?.selectedFulfillment;
+            return {
+                ...base,
+                itemType: 'software' as CartItemType,
+                fulfillmentMethod: prod?.fulfillmentMethod,
+                physicalUsbPrice: prod?.physicalUsbPrice,
+                emailLinksPrice: prod?.emailLinksPrice,
+                selectedFulfillment: fulfillment,
+            };
+        }
+        return { ...base, itemType: itemType as CartItemType };
+    };
+
     // Handle itemsWithProducts format
     if (data && !Array.isArray(data) && data.itemsWithProducts && Array.isArray(data.itemsWithProducts)) {
-        return data.itemsWithProducts.map(item => ({
-            cartItemId: item.productId,
-            id: item.product.id,
-            quantity: item.quantity,
-            price: item.product.price,
-            title: item.product.title,
-            image: item.product.images?.[0] || '/led-product.png',
-            brand: item.product.brand,
-            reference: item.product.reference,
-            stock: item.product.stock
-        }));
+        return data.itemsWithProducts.map((item) => mapProduct(item, item.product));
     }
 
     // Handle array response
     if (Array.isArray(data)) {
-        return data.map(item => ({
-            cartItemId: item.cartItemId || item.productId || item.id,
-            id: item.productId || item.id,
-            quantity: item.quantity,
-            price: item.product?.price || item.price,
-            title: item.product?.title || item.title,
-            image: item.product?.images?.[0] || item.image || '/led-product.png',
-            brand: item.product?.brand || item.brand,
-            reference: item.product?.reference || item.reference,
-            stock: item.product?.stock || item.stock
-        }));
+        return data.map((item) => mapProduct(item, item.product));
     }
 
     return [];
@@ -147,24 +174,34 @@ export const CartService = {
         try {
             const headers = await getAuthHeaders();
             
-            // Check if item already exists
+            // Check if item already exists (for software, only merge if same fulfillment)
             const currentCart = await CartService.getCart();
-            const existingItem = currentCart.find(cartItem => cartItem.id === item.id);
+            const existingItem = currentCart.find(cartItem => {
+                if (cartItem.id !== item.id) return false;
+                if (item.itemType === "software" && item.selectedFulfillment) {
+                    return cartItem.selectedFulfillment === item.selectedFulfillment;
+                }
+                return true;
+            });
 
             if (existingItem && existingItem.cartItemId) {
-                // Update existing item quantity
                 const newQuantity = existingItem.quantity + item.quantity;
                 return await CartService.updateQuantity(existingItem.cartItemId, newQuantity);
             }
 
-            // Add new item
+            // Add new item - backend uses itemType to look up in Product (led) vs SoftwareProduct (software) table
+            const payload: { productId: string; quantity: number; itemType?: CartItemType; selectedFulfillment?: string } = {
+                productId: item.id,
+                quantity: item.quantity,
+            };
+            if (item.itemType === "software") {
+                payload.itemType = "software";
+                if (item.selectedFulfillment) payload.selectedFulfillment = item.selectedFulfillment;
+            }
             const response = await fetch(`${API_BASE_URL}/cart`, {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({
-                    productId: item.id,
-                    quantity: item.quantity
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {

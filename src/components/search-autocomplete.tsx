@@ -4,13 +4,17 @@ import * as React from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ProductService, type SearchSuggestionProduct } from "@/services/product-service";
+import { SoftwareProductService } from "@/services/software-product-service";
 import { cn } from "@/lib/utils";
+
+type SearchTarget = "led" | "software";
 
 interface SearchSuggestion {
     type: 'brand' | 'reference' | 'title' | 'model' | 'panel' | 'sku' | 'product';
     value: string;
     display: string;
-    product?: SearchSuggestionProduct;
+    product?: SearchSuggestionProduct | { id: string; title: string; brand: string; reference: string; price?: number | string; salePrice?: number | string | null; stock?: number | string };
+    searchTarget?: SearchTarget;
 }
 
 function escapeRegExp(text: string): string {
@@ -55,10 +59,12 @@ function highlightMatches(text: string, query: string): React.ReactNode {
 interface SearchAutocompleteProps {
     value: string;
     onChange: (value: string) => void;
-    onSelect?: (value: string, type?: SearchSuggestion['type'], product?: SearchSuggestionProduct) => void;
+    onSelect?: (value: string, type?: SearchSuggestion['type'], product?: SearchSuggestion['product'], ctx?: { searchTarget?: SearchTarget }) => void;
     onSubmit?: (value: string) => void;
     placeholder?: string;
     className?: string;
+    /** When "software", uses software API and routes apply to /software */
+    searchTarget?: SearchTarget;
 }
 
 export function SearchAutocomplete({ 
@@ -67,7 +73,8 @@ export function SearchAutocomplete({
     onSelect,
     onSubmit,
     placeholder = "Search by TV Model (e.g. UE43...), Part Number, or Brand...",
-    className 
+    className,
+    searchTarget = "led",
 }: SearchAutocompleteProps) {
     const [suggestions, setSuggestions] = React.useState<SearchSuggestion[]>([]);
     const [isOpen, setIsOpen] = React.useState(false);
@@ -96,27 +103,42 @@ export function SearchAutocomplete({
         // Debounce API call
         debounceTimerRef.current = setTimeout(async () => {
             try {
-                const data = await ProductService.getSearchSuggestions(value.trim(), 8);
-                
-                const productSuggestions: SearchSuggestion[] = (data.products ?? []).slice(0, 5).map((product) => ({
-                    type: "product",
-                    value: product.id,
-                    display: product.title,
-                    product,
-                }));
-
-                const allSuggestions: SearchSuggestion[] = [
-                    ...productSuggestions,
-                    ...data.brands.map(brand => ({ type: 'brand' as const, value: brand, display: brand })),
-                    ...data.references.map(ref => ({ type: 'reference' as const, value: ref, display: ref })),
-                    ...data.suks.map(sku => ({ type: 'sku' as const, value: sku, display: sku })),
-                    ...data.tvPanelTypes.map(panel => ({ type: 'panel' as const, value: panel, display: panel })),
-                    ...data.models.map(model => ({ type: 'model' as const, value: model, display: model })),
-                    ...data.titles.slice(0, 3).map(title => ({ type: 'title' as const, value: title, display: title.length > 60 ? title.substring(0, 60) + '...' : title }))
-                ];
-
-                setSuggestions(allSuggestions.slice(0, 12)); // Show richer live results
-                // Keep dropdown open if we have suggestions or if user is still typing
+                if (searchTarget === "software") {
+                    const data = await SoftwareProductService.getSearchSuggestions(value.trim(), 8);
+                    const productSuggestions: SearchSuggestion[] = (data.products ?? []).slice(0, 5).map((product) => ({
+                        type: "product" as const,
+                        value: product.id,
+                        display: product.title,
+                        product: { id: product.id, title: product.title, brand: product.brand, reference: product.reference, price: product.price, salePrice: product.salePrice, stock: product.stock },
+                        searchTarget: "software",
+                    }));
+                    const allSuggestions: SearchSuggestion[] = [
+                        ...productSuggestions,
+                        ...data.brands.map(brand => ({ type: 'brand' as const, value: brand, display: brand, searchTarget: 'software' as const })),
+                        ...data.references.map(ref => ({ type: 'reference' as const, value: ref, display: ref, searchTarget: 'software' as const })),
+                        ...data.models.map(model => ({ type: 'model' as const, value: model, display: model, searchTarget: 'software' as const })),
+                    ];
+                    setSuggestions(allSuggestions.slice(0, 12));
+                } else {
+                    const data = await ProductService.getSearchSuggestions(value.trim(), 8);
+                    const productSuggestions: SearchSuggestion[] = (data.products ?? []).slice(0, 5).map((product) => ({
+                        type: "product" as const,
+                        value: product.id,
+                        display: product.title,
+                        product,
+                        searchTarget: "led" as const,
+                    }));
+                    const allSuggestions: SearchSuggestion[] = [
+                        ...productSuggestions,
+                        ...data.brands.map(brand => ({ type: 'brand' as const, value: brand, display: brand })),
+                        ...data.references.map(ref => ({ type: 'reference' as const, value: ref, display: ref })),
+                        ...data.suks.map(sku => ({ type: 'sku' as const, value: sku, display: sku })),
+                        ...data.tvPanelTypes.map(panel => ({ type: 'panel' as const, value: panel, display: panel })),
+                        ...data.models.map(model => ({ type: 'model' as const, value: model, display: model })),
+                        ...data.titles.slice(0, 3).map(title => ({ type: 'title' as const, value: title, display: title.length > 60 ? title.substring(0, 60) + '...' : title }))
+                    ];
+                    setSuggestions(allSuggestions.slice(0, 12));
+                }
                 setIsOpen(true);
                 setSelectedIndex(-1);
             } catch (error) {
@@ -157,7 +179,7 @@ export function SearchAutocomplete({
         onChange(suggestion.type === "product" ? suggestion.display : suggestion.value);
         setIsOpen(false);
         if (onSelect) {
-            onSelect(suggestion.value, suggestion.type, suggestion.product);
+            onSelect(suggestion.value, suggestion.type, suggestion.product, { searchTarget: suggestion.searchTarget ?? searchTarget });
         }
         inputRef.current?.blur();
     };

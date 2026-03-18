@@ -37,7 +37,7 @@ interface BrandInfo {
 
 const NAV_TABS = [
   { key: "led", label: "LED Backlights", href: "/leds", hasDropdown: true },
-  { key: "software", label: "TV Software & Firmware", href: "#software", hasDropdown: false },
+  { key: "software", label: "TV Software & Firmware", href: "/software", hasDropdown: false },
   { key: "repair", label: "Repair Services", href: "#repair", hasDropdown: false },
   { key: "marketplace", label: "TV Marketplace", href: "#marketplace", hasDropdown: false },
   { key: "components", label: "TV Components", href: "#components", hasDropdown: false },
@@ -188,7 +188,12 @@ export function LedsSubNavbar() {
             <Link
               key={tab.key}
               href={tab.href}
-              className="text-sm whitespace-nowrap py-3 transition-colors text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white font-medium"
+              className={cn(
+                "text-sm whitespace-nowrap py-3 transition-colors font-medium",
+                (tab.key === "software" && pathname.startsWith("/software"))
+                  ? "text-gray-900 dark:text-white font-semibold"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              )}
             >
               {tab.label}
             </Link>

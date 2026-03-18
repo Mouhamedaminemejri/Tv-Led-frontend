@@ -11,6 +11,7 @@ import { CreditCard, Truck, Smartphone, AlertCircle, Loader2, CheckCircle2, Lock
 import { toast } from "sonner";
 import { useCart } from "@/context/cart-context";
 import { ProductService, type LedProduct } from "@/services/product-service";
+import { SoftwareProductService, type SoftwareProduct, type SoftwareFulfillmentChoice } from "@/services/software-product-service";
 import { getUserId } from "@/utils/user-id";
 import { TokenManager } from "@/services/auth-service";
 import AuthService from "@/services/auth-service";
@@ -51,6 +52,8 @@ interface CheckoutFormData {
     paymentMethod: PaymentMethod;
 }
 
+type ItemType = "led" | "software";
+
 interface CheckoutItem {
     id: string;
     title: string;
@@ -58,6 +61,36 @@ interface CheckoutItem {
     price: number;
     image?: string;
     brand?: string;
+    itemType?: ItemType;
+    /** Full product for software items (needed for fulfillmentMethod, physicalUsbPrice, emailLinksPrice) */
+    product?: LedProduct | SoftwareProduct;
+}
+
+function computeOrderTotal(
+    items: CheckoutItem[],
+    softwareFulfillmentChoices: Map<string, SoftwareFulfillmentChoice>
+): number {
+    let total = 0;
+    for (const item of items) {
+        if (item.itemType === "software" && item.product && "fulfillmentMethod" in item.product) {
+            const prod = item.product as SoftwareProduct;
+            const choice: SoftwareFulfillmentChoice = prod.fulfillmentMethod === "BOTH"
+                ? (softwareFulfillmentChoices.get(prod.id) ?? "PHYSICAL_USB_WITH_LINKS")
+                : (prod.fulfillmentMethod as SoftwareFulfillmentChoice);
+            const usbPrice = prod.physicalUsbPrice ?? prod.price;
+            const emailPrice = prod.emailLinksPrice ?? prod.price;
+            if (choice === "BOTH") {
+                total += (usbPrice + emailPrice) * item.quantity;
+            } else if (choice === "PHYSICAL_USB_WITH_LINKS") {
+                total += usbPrice * item.quantity;
+            } else {
+                total += emailPrice * item.quantity;
+            }
+        } else {
+            total += item.price * item.quantity;
+        }
+    }
+    return total;
 }
 
 export default function CheckoutPage() {
@@ -143,65 +176,170 @@ function CheckoutInner() {
         prefill();
     }, []);
 
+    const itemTypeParam = searchParams.get("itemType") as ItemType | null;
+    
+    // Software products with BOTH require user to choose fulfillment before submit
+    const [softwareFulfillmentChoices, setSoftwareFulfillmentChoices] = React.useState<Map<string, SoftwareFulfillmentChoice>>(new Map());
+    const softwareWithBoth = React.useMemo(() => 
+        checkoutItems.filter(
+            (item): item is CheckoutItem & { product: SoftwareProduct } =>
+                item.itemType === "software" &&
+                item.product != null &&
+                (item.product as SoftwareProduct).fulfillmentMethod === "BOTH"
+        ),
+        [checkoutItems]
+    );
+    const needsFulfillmentChoice = softwareWithBoth.length > 0;
+    const allFulfillmentChosen = softwareWithBoth.every(item => softwareFulfillmentChoices.has(item.id));
+
+    const softwareBothIds = React.useMemo(() => softwareWithBoth.map(i => i.id).join(","), [softwareWithBoth]);
+
+    // Pre-select USB for BOTH products when they first appear (so total displays correctly)
+    React.useEffect(() => {
+        if (softwareBothIds) {
+            const ids = softwareBothIds.split(",");
+            setSoftwareFulfillmentChoices(prev => {
+                const next = new Map(prev);
+                let changed = false;
+                for (const id of ids) {
+                    if (!next.has(id)) {
+                        next.set(id, "PHYSICAL_USB_WITH_LINKS");
+                        changed = true;
+                    }
+                }
+                return changed ? next : prev;
+            });
+        }
+    }, [softwareBothIds]);
+
     // Load checkout items based on source
     React.useEffect(() => {
         const loadCheckoutItems = async () => {
             setLoading(true);
             try {
                 if (isCartCheckout) {
-                    // Use cart items
-                    const items: CheckoutItem[] = cart.map(item => ({
-                        id: item.id,
-                        title: item.title,
-                        quantity: item.quantity,
-                        price: item.price,
-                        image: item.image,
-                        brand: item.brand
-                    }));
+                    const items: CheckoutItem[] = [];
+                    for (const cartItem of cart) {
+                        try {
+                            const ledProduct = await ProductService.getProductById(cartItem.id);
+                            if (ledProduct) {
+                                items.push({
+                                    id: ledProduct.id,
+                                    title: ledProduct.title,
+                                    quantity: cartItem.quantity,
+                                    price: ledProduct.price,
+                                    image: ledProduct.images?.[0],
+                                    brand: ledProduct.brand,
+                                    itemType: "led",
+                                    product: ledProduct,
+                                });
+                                continue;
+                            }
+                        } catch { /* not LED */ }
+                        try {
+                            const softwareProduct = await SoftwareProductService.getById(cartItem.id);
+                            const price = softwareProduct.physicalUsbPrice ?? softwareProduct.price;
+                            items.push({
+                                id: softwareProduct.id,
+                                title: softwareProduct.title,
+                                quantity: cartItem.quantity,
+                                price,
+                                image: softwareProduct.images?.[0],
+                                brand: softwareProduct.brand,
+                                itemType: "software",
+                                product: softwareProduct,
+                            });
+                        } catch {
+                            items.push({
+                                id: cartItem.id,
+                                title: cartItem.title,
+                                quantity: cartItem.quantity,
+                                price: cartItem.price,
+                                image: cartItem.image,
+                                brand: cartItem.brand,
+                            });
+                        }
+                    }
                     setCheckoutItems(items);
                 } else if (productId && quantity) {
-                    // Load single product and add to cart for direct purchase
-                    const product = await ProductService.getProductById(productId);
-                    if (product) {
-                        const qty = parseInt(quantity, 10);
-                        const productKey = `${productId}-${qty}`;
-                        
-                        // Only add to cart once (prevent infinite loop)
+                    const qty = parseInt(quantity, 10) || 1;
+                    const productKey = `${productId}-${qty}`;
+                    const isSoftware = itemTypeParam === "software";
+                    
+                    if (isSoftware) {
+                        let product: SoftwareProduct;
+                        try {
+                            product = await SoftwareProductService.getById(productId);
+                        } catch {
+                            toast.error("Software product not found");
+                            router.push("/software");
+                            return;
+                        }
+                        const price = product.physicalUsbPrice ?? product.price;
                         if (productAddedToCartRef.current !== productKey) {
                             productAddedToCartRef.current = productKey;
-                            
-                            // Add product to cart first (backend expects items in cart)
                             try {
                                 await addToCart({
                                     id: product.id,
                                     title: product.title,
                                     brand: product.brand,
                                     reference: product.reference,
-                                    price: product.price,
-                                    image: product.images?.[0] || '/led-product.png',
+                                    price,
+                                    image: product.images?.[0] || "/file.svg",
                                     quantity: qty,
-                                    stock: product.stock
+                                    stock: product.stock,
+                                    itemType: "software",
                                 });
                             } catch (cartError) {
                                 console.error("Failed to add to cart:", cartError);
-                                // Continue anyway - cart might already have the item
                             }
                         }
-                        
                         setCheckoutItems([{
                             id: product.id,
                             title: product.title,
                             quantity: qty,
-                            price: product.price,
+                            price,
                             image: product.images?.[0],
-                            brand: product.brand
+                            brand: product.brand,
+                            itemType: "software",
+                            product,
                         }]);
                     } else {
-                        toast.error("Product not found");
-                        router.push("/leds");
+                        const product = await ProductService.getProductById(productId);
+                        if (product) {
+                            if (productAddedToCartRef.current !== productKey) {
+                                productAddedToCartRef.current = productKey;
+                                try {
+                                    await addToCart({
+                                        id: product.id,
+                                        title: product.title,
+                                        brand: product.brand,
+                                        reference: product.reference,
+                                        price: product.price,
+                                        image: product.images?.[0] || "/led-product.png",
+                                        quantity: qty,
+                                        stock: product.stock,
+                                    });
+                                } catch (cartError) {
+                                    console.error("Failed to add to cart:", cartError);
+                                }
+                            }
+                            setCheckoutItems([{
+                                id: product.id,
+                                title: product.title,
+                                quantity: qty,
+                                price: product.price,
+                                image: product.images?.[0],
+                                brand: product.brand,
+                                itemType: "led",
+                                product,
+                            }]);
+                        } else {
+                            toast.error("Product not found");
+                            router.push("/leds");
+                        }
                     }
                 } else {
-                    // No valid checkout source, redirect
                     router.push("/leds");
                 }
             } catch (error) {
@@ -215,9 +353,12 @@ function CheckoutInner() {
 
         loadCheckoutItems();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [productId, quantity, isCartCheckout]); // Removed cart, router, addToCart from dependencies
+    }, [productId, quantity, isCartCheckout, itemTypeParam]);
 
-    const totalAmount = checkoutItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const totalAmount = React.useMemo(
+        () => computeOrderTotal(checkoutItems, softwareFulfillmentChoices),
+        [checkoutItems, softwareFulfillmentChoices]
+    );
 
     // Validation functions
     const validateCIN = (cin: string): boolean => {
@@ -371,6 +512,18 @@ function CheckoutInner() {
                 return "CASH_ON_DELIVERY";
             };
 
+            if (needsFulfillmentChoice && !allFulfillmentChosen) {
+                toast.error("Please choose delivery method for all software products");
+                return;
+            }
+
+            const softwareFulfillmentChoicesArray = needsFulfillmentChoice
+                ? softwareWithBoth.map((item) => ({
+                      softwareProductId: item.id,
+                      choice: softwareFulfillmentChoices.get(item.id)!,
+                  }))
+                : undefined;
+
             // Prepare order data according to CreateOrderDto
             const orderData = {
                // userId: userId,
@@ -394,6 +547,7 @@ function CheckoutInner() {
                     city: formData.city,
                     postalCode: formData.postalCode,
                 },
+                ...(softwareFulfillmentChoicesArray?.length ? { softwareFulfillmentChoices: softwareFulfillmentChoicesArray } : {}),
             };
 
             // Backend requires JWT or X-Guest-Token
@@ -948,15 +1102,71 @@ function CheckoutInner() {
                             <div className="space-y-6 bg-white dark:bg-zinc-950 border border-gray-200 dark:border-white/10 rounded-xl p-6 shadow-sm dark:shadow-none">
                                 <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Review Your Order</h2>
                                 
+                                {needsFulfillmentChoice && (
+                                    <div className="border border-amber-200 dark:border-amber-800/50 rounded-lg p-4 bg-amber-50/50 dark:bg-amber-900/10">
+                                        <h4 className="font-semibold text-amber-900 dark:text-amber-200 mb-3">Delivery method for software</h4>
+                                        <p className="text-sm text-amber-800/80 dark:text-amber-200/70 mb-4">Select how you want to receive each software product.</p>
+                                        <div className="space-y-4">
+                                            {softwareWithBoth.map((item) => {
+                                                const prod = item.product;
+                                                const usbPrice = (prod.physicalUsbPrice ?? prod.price) * item.quantity;
+                                                const emailPrice = (prod.emailLinksPrice ?? prod.price) * item.quantity;
+                                                const bothPrice = usbPrice + emailPrice;
+                                                const chosen = softwareFulfillmentChoices.get(item.id);
+                                                return (
+                                                    <div key={item.id} className="border border-gray-200 dark:border-white/10 rounded-lg p-3 bg-white dark:bg-black/20">
+                                                        <p className="font-medium text-gray-900 dark:text-white mb-2">{item.title}</p>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(["PHYSICAL_USB_WITH_LINKS", "EMAIL_DOWNLOAD_LINKS", "BOTH"] as const).map((opt) => {
+                                                                const label = opt === "PHYSICAL_USB_WITH_LINKS" ? "64GB USB stick" : opt === "EMAIL_DOWNLOAD_LINKS" ? "Email links" : "Both (USB + Email)";
+                                                                const amount = opt === "BOTH" ? bothPrice : opt === "PHYSICAL_USB_WITH_LINKS" ? usbPrice : emailPrice;
+                                                                const isSelected = chosen === opt;
+                                                                return (
+                                                                    <button
+                                                                        key={opt}
+                                                                        type="button"
+                                                                        onClick={() => setSoftwareFulfillmentChoices(prev => new Map(prev).set(item.id, opt))}
+                                                                        className={`px-3 py-2 rounded-lg text-sm font-medium border-2 transition-colors ${
+                                                                            isSelected
+                                                                                ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300"
+                                                                                : "border-gray-200 dark:border-white/10 hover:border-gray-300 dark:hover:border-white/20"
+                                                                        }`}
+                                                                    >
+                                                                        {label} — {amount.toFixed(2)} TND
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                                
                                 <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-black/30">
                                     <h4 className="font-medium mb-3 text-gray-900 dark:text-white">Order Summary</h4>
                                     <div className="space-y-2">
-                                        {checkoutItems.map(item => (
-                                            <div key={item.id} className="flex justify-between text-sm">
-                                                <span className="text-gray-600 dark:text-gray-400">{item.title} x{item.quantity}</span>
-                                                <span className="text-gray-900 dark:text-white">{(item.price * item.quantity).toFixed(2)} TND</span>
-                                            </div>
-                                        ))}
+                                        {checkoutItems.map(item => {
+                                            let lineTotal = item.price * item.quantity;
+                                            if (item.itemType === "software" && item.product && "fulfillmentMethod" in item.product) {
+                                                const prod = item.product as SoftwareProduct;
+                                                const choice = prod.fulfillmentMethod === "BOTH"
+                                                    ? softwareFulfillmentChoices.get(prod.id)
+                                                    : (prod.fulfillmentMethod as SoftwareFulfillmentChoice);
+                                                const usb = (prod.physicalUsbPrice ?? prod.price) * item.quantity;
+                                                const email = (prod.emailLinksPrice ?? prod.price) * item.quantity;
+                                                if (choice === "BOTH") lineTotal = usb + email;
+                                                else if (choice === "PHYSICAL_USB_WITH_LINKS") lineTotal = usb;
+                                                else if (choice === "EMAIL_DOWNLOAD_LINKS") lineTotal = email;
+                                            }
+                                            return (
+                                                <div key={item.id} className="flex justify-between text-sm">
+                                                    <span className="text-gray-600 dark:text-gray-400">{item.title} x{item.quantity}</span>
+                                                    <span className="text-gray-900 dark:text-white">{lineTotal.toFixed(2)} TND</span>
+                                                </div>
+                                            );
+                                        })}
                                         <div className="border-t border-gray-200 dark:border-gray-700 pt-2 mt-2 flex justify-between font-semibold">
                                             <span className="text-gray-900 dark:text-white">Total</span>
                                             <span className="text-gray-900 dark:text-white">{totalAmount.toFixed(2)} TND</span>
@@ -995,25 +1205,39 @@ function CheckoutInner() {
                         <div className="bg-white dark:bg-zinc-950 border border-gray-200 dark:border-white/10 rounded-xl p-6 sticky top-24 shadow-sm dark:shadow-none">
                             <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Order Summary</h3>
                             <div className="space-y-4">
-                                {checkoutItems.map(item => (
-                                    <div key={item.id} className="flex gap-3">
-                                        {item.image && (
-                                            <div className="relative h-16 w-16 bg-gray-100 dark:bg-white/5 rounded-lg border border-gray-200 dark:border-white/10 flex-shrink-0 overflow-hidden">
-                                                <Image
-                                                    src={item.image}
-                                                    alt={item.title}
-                                                    fill
-                                                    className="object-contain p-1"
-                                                />
+                                {checkoutItems.map(item => {
+                                    let lineTotal = item.price * item.quantity;
+                                    if (item.itemType === "software" && item.product && "fulfillmentMethod" in item.product) {
+                                        const prod = item.product as SoftwareProduct;
+                                        const choice = prod.fulfillmentMethod === "BOTH"
+                                            ? softwareFulfillmentChoices.get(prod.id)
+                                            : (prod.fulfillmentMethod as SoftwareFulfillmentChoice);
+                                        const usb = (prod.physicalUsbPrice ?? prod.price) * item.quantity;
+                                        const email = (prod.emailLinksPrice ?? prod.price) * item.quantity;
+                                        if (choice === "BOTH") lineTotal = usb + email;
+                                        else if (choice === "PHYSICAL_USB_WITH_LINKS") lineTotal = usb;
+                                        else if (choice === "EMAIL_DOWNLOAD_LINKS") lineTotal = email;
+                                    }
+                                    return (
+                                        <div key={item.id} className="flex gap-3">
+                                            {item.image && (
+                                                <div className="relative h-16 w-16 bg-gray-100 dark:bg-white/5 rounded-lg border border-gray-200 dark:border-white/10 flex-shrink-0 overflow-hidden">
+                                                    <Image
+                                                        src={item.image}
+                                                        alt={item.title}
+                                                        fill
+                                                        className="object-contain p-1"
+                                                    />
+                                                </div>
+                                            )}
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium truncate text-gray-900 dark:text-white">{item.title}</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">Qty: {item.quantity}</p>
+                                                <p className="text-sm font-bold mt-1 text-gray-900 dark:text-white">{lineTotal.toFixed(2)} TND</p>
                                             </div>
-                                        )}
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium truncate text-gray-900 dark:text-white">{item.title}</p>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">Qty: {item.quantity}</p>
-                                            <p className="text-sm font-bold mt-1 text-gray-900 dark:text-white">{(item.price * item.quantity).toFixed(2)} TND</p>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                                 <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2">
                                     <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                                         <span>Subtotal</span>
@@ -1078,7 +1302,7 @@ function CheckoutInner() {
                             <Button
                                 type="button"
                                 onClick={handleSubmit}
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || (needsFulfillmentChoice && !allFulfillmentChosen)}
                                 className="bg-green-600 hover:bg-green-700"
                             >
                                 {isSubmitting ? (
